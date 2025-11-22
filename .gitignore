@@ -1,0 +1,9 @@
+node_modules/
+.env
+session.json
+temp/
+debug_screenshot.png
+debug_source.html
+dist/
+*.log
+
