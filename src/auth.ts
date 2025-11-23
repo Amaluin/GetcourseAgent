@@ -4,7 +4,8 @@ import { config } from './config';
 export async function loginToGetCourse(page: Page) {
   console.log('🔑 Авторизация в GetCourse...');
   
-  await page.goto(config.gcUrl);
+  // Используем 'domcontentloaded' вместо 'load' - не ждем всех ресурсов
+  await page.goto(config.gcUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   
   // Ждем загрузки страницы
   await page.waitForLoadState('domcontentloaded');

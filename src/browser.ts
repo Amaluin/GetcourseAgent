@@ -1,5 +1,6 @@
 import { chromium, Browser, Page, BrowserContext } from 'playwright';
 import { config } from './config';
+import { setupAutoAdBlocker, closeAdsAndModals } from './ad-blocker';
 import fs from 'fs';
 import path from 'path';
 
@@ -36,6 +37,10 @@ export async function initBrowser(): Promise<{ browser: Browser; page: Page }> {
 
   page = await context.newPage();
   
+  // НЕ активируем автоматический блокировщик - он кликает по меню!
+  // await setupAutoAdBlocker(page);
+  // Вместо этого будем закрывать рекламу вручную в нужных местах
+  
   // Перехватываем закрытие страницы, чтобы сохранить сессию
   context.on('close', async () => {
       // Это событие может не сработать при принудительном закрытии, поэтому лучше сохранять явно
@@ -43,6 +48,9 @@ export async function initBrowser(): Promise<{ browser: Browser; page: Page }> {
 
   return { browser, page };
 }
+
+// Экспортируем функцию для ручного закрытия рекламы
+export { closeAdsAndModals };
 
 export async function saveSession() {
     if (context) {

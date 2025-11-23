@@ -1,3 +1,5 @@
+import { LessonContent } from './lesson-parser';
+
 export interface HomeworkSubmission {
   id: string;
   studentName: string;
@@ -5,8 +7,10 @@ export interface HomeworkSubmission {
   imageUrls: string[];
   fileUrls: string[];
   assignmentTitle: string; // Название тренинга/урока
+  lessonId?: string; // ID урока
   idealAnswer?: string; // Идеальный ответ из задания
   taskDescription?: string; // Описание задания
+  lessonContent?: LessonContent; // Содержимое урока (выжимка)
 }
 
 export interface AIFeedback {

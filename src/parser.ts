@@ -12,8 +12,8 @@ export async function getUncheckedSubmissions(page: Page): Promise<HomeworkSubmi
   // В GetCourse каждое задание — это div.answer_wrapper с data-id
   const answerWrappers = await page.locator('.answer_wrapper[data-id]').all();
   
-  // Ограничиваем первыми 1 для теста
-  const limitedWrappers = answerWrappers.slice(0, 1);
+  // Ограничиваем первыми 2 для теста
+  const limitedWrappers = answerWrappers.slice(0, 2);
   
   console.log(`✅ Найдено ${answerWrappers.length} заданий. Обрабатываем первые ${limitedWrappers.length} для теста.`);
 
@@ -30,8 +30,15 @@ export async function getUncheckedSubmissions(page: Page): Promise<HomeworkSubmi
       // Текст ответа
       const text = await wrapper.locator('.answer-text').innerText().catch(() => '');
       
+      // Комментарии студента (дополнительные сообщения)
+      const studentComments = await wrapper.locator('.comment-text').allInnerTexts().catch(() => []);
+      const fullText = [text, ...studentComments].filter(t => t.trim()).join('\n\n---\n\n');
+      
       // Название урока/задания
       const assignmentTitle = await wrapper.locator('.show-lesson-link').innerText().catch(() => 'Без названия');
+      
+      // ID урока (из data-lesson-id)
+      const lessonId = await wrapper.getAttribute('data-lesson-id') || '';
       
       // Ссылки на файлы и картинки - улучшенный поиск
       const downloadLinks = await wrapper.locator('.answer-files a[href]').evaluateAll(links => 
@@ -54,10 +61,11 @@ export async function getUncheckedSubmissions(page: Page): Promise<HomeworkSubmi
         submissions.push({
           id,
           studentName,
-          text,
+          text: fullText, // Сохраняем полный текст с комментариями
           imageUrls,
           fileUrls: otherFiles,
           assignmentTitle: assignmentTitle.trim(),
+          lessonId: lessonId, // ID урока для загрузки содержимого
           idealAnswer: '', // Заполним позже
           taskDescription: '' // Заполним позже
         });
@@ -120,6 +128,17 @@ export async function enrichSubmissionWithTaskDetails(submission: HomeworkSubmis
                          await spoilers.nth(i).click({ force: true }).catch(() => {});
                          await page.waitForTimeout(300);
                      }
+                 }
+             }
+
+             // Раскрываем "Задание X" (специфично для этого случая)
+             const taskHeaders = modal.locator('li, div, p, strong, b, span').filter({ hasText: /^Задание \d+\.|^Дополнительное задание/i });
+             const taskHeaderCount = await taskHeaders.count();
+             if (taskHeaderCount > 0) {
+                 console.log(`   👉 Найдено ${taskHeaderCount} заголовков заданий. Кликаем для раскрытия...`);
+                 for (let i = 0; i < taskHeaderCount; i++) {
+                     await taskHeaders.nth(i).click({ force: true }).catch(() => {});
+                     await page.waitForTimeout(300);
                  }
              }
 

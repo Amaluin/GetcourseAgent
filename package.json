@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "ts-node src/index.ts"
+    "start": "ts-node src/index.ts",
+    "debug": "ts-node src/debug-interactive.ts",
+    "inspect": "ts-node src/debug-click-inspector.ts",
+    "find-arrows": "ts-node src/find-arrows.ts"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +17,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
     "@types/node": "^24.10.1",
+    "adm-zip": "^0.5.16",
     "axios": "^1.13.2",
     "dotenv": "^17.2.3",
     "openai": "^6.9.1",
@@ -23,6 +27,7 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
     "@types/uuid": "^10.0.0"
   }
 }

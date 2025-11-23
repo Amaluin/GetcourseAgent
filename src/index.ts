@@ -3,6 +3,7 @@ import { loginToGetCourse } from './auth';
 import { config } from './config';
 import { getUncheckedSubmissions, enrichSubmissionWithTaskDetails, postCommentAndVerdict } from './parser';
 import { checkHomework } from './ai';
+import { getLessonContent } from './lesson-parser';
 
 const DRY_RUN = true; // ⚠️ Если true — мы только читаем и логируем, но не отправляем комментарии
 
@@ -39,12 +40,41 @@ async function main() {
       console.log('--------------------------------------------------');
       console.log(`🎓 Студент: ${submission.studentName}`);
       console.log(`📝 Задание: ${submission.assignmentTitle}`);
+      if (submission.text) {
+          console.log(`💬 Ответ студента:\n${submission.text}`);
+      } else {
+          console.log(`💬 Ответ студента: [Текст отсутствует]`);
+      }
       
-      // ПОДГРУЖАЕМ ДЕТАЛИ (Текст задания и идеальный ответ) ПЕРЕД ПРОВЕРКОЙ
-      // Теперь это происходит последовательно для каждого студента
+      // ШАГ 1: Загружаем содержимое урока (выжимка)
+      if (submission.lessonId) {
+        console.log(`\n${'='.repeat(60)}`);
+        console.log(`📚 ШАГ 1: Анализ урока (ID: ${submission.lessonId})`);
+        console.log(`${'='.repeat(60)}`);
+        
+        try {
+          submission.lessonContent = await getLessonContent(page, submission.lessonId);
+          console.log(`✅ Урок успешно проанализирован!`);
+          
+          // Возвращаемся в ленту ответов после просмотра урока
+          console.log(`🔙 Возвращаюсь в ленту ответов...`);
+          await page.goto(config.gcStreamUrl);
+          await page.waitForLoadState('domcontentloaded');
+          await page.waitForTimeout(1000);
+        } catch (error) {
+          console.error(`❌ Ошибка при загрузке урока:`, error);
+          console.log(`⚠️ Продолжаю проверку без контекста урока...`);
+        }
+        
+        console.log(`${'='.repeat(60)}\n`);
+      } else {
+        console.log(`⚠️ Урок ID не найден, пропускаю анализ урока`);
+      }
+      
+      // ШАГ 2: Загружаем детали задания (идеальный ответ)
       await enrichSubmissionWithTaskDetails(submission, page);
 
-      // Спрашиваем AI
+      // ШАГ 3: Спрашиваем AI (теперь с контекстом урока)
       const feedback = await checkHomework(submission);
       
       console.log(`🤖 Вердикт AI: ${feedback.status.toUpperCase()}`);
