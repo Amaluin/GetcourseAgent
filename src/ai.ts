@@ -233,7 +233,7 @@ function processStudentName(fullName: string): string {
   return parts[0].charAt(0).toUpperCase() + parts[0].slice(1).toLowerCase();
 }
 
-export async function checkHomework(submission: HomeworkSubmission): Promise<AIFeedback> {
+export async function checkHomework(submission: HomeworkSubmission, graphRAGContext?: string): Promise<AIFeedback> {
   console.log(`🧠 AI анализирует работу студента: ${submission.studentName}`);
   
   // Debug ключей (скрываем часть ключа)
@@ -251,6 +251,14 @@ export async function checkHomework(submission: HomeworkSubmission): Promise<AIF
     
     Название урока: ${submission.assignmentTitle}
   `;
+
+  // ДОБАВЛЯЕМ: Контекст из GraphRAG (база знаний)
+  if (graphRAGContext) {
+    console.log('\n=== КОНТЕКСТ ИЗ БАЗЫ ЗНАНИЙ (GraphRAG) ===');
+    console.log(graphRAGContext);
+    console.log('==========================================\n');
+    prompt += `\n\n${graphRAGContext}`;
+  }
 
   // ДОБАВЛЯЕМ: Выжимка урока (что объяснялось)
   if (submission.lessonContent?.summary) {

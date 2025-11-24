@@ -348,14 +348,151 @@ export interface VideoSection {
   descriptionAfter: string;   // Текст ПОСЛЕ видео
 }
 
+export interface DetailedSection {
+  sectionNumber: number;
+  title: string;
+  content: string;
+  videoUrl?: string;
+  videoTitle?: string;
+  beforeVideo: string;
+  afterVideo: string;
+  timestamp?: string;
+}
+
 export interface LessonContent {
   lessonId: string;
   title: string;
   fullText: string;           // Весь текст урока (для запасного варианта)
   videoSections: VideoSection[]; // Структурированные блоки видео + описания
+  detailedSections?: DetailedSection[]; // Детальные секции для базы знаний
   summary: string;            // Выжимка от AI
   imageUrls: string[];
   fileUrls: string[];
+}
+
+/**
+ * Создает детальные секции урока для базы знаний
+ */
+function createDetailedSections(
+  videoSections: VideoSection[],
+  fullText: string
+): DetailedSection[] {
+  const sections: DetailedSection[] = [];
+  
+  // Если есть видео, создаем секции по видео
+  if (videoSections.length > 0) {
+    videoSections.forEach((videoSection, index) => {
+      const content = `${videoSection.descriptionBefore}\n\n${videoSection.descriptionAfter}`.trim();
+      
+      sections.push({
+        sectionNumber: index + 1,
+        title: videoSection.videoTitle || `Видео ${index + 1}`,
+        content: content || videoSection.videoTitle || 'Видео без описания',
+        videoUrl: videoSection.videoUrl,
+        videoTitle: videoSection.videoTitle,
+        beforeVideo: videoSection.descriptionBefore,
+        afterVideo: videoSection.descriptionAfter,
+        timestamp: new Date().toISOString()
+      });
+    });
+  }
+  
+  // Если нет видео или видео без описаний, разбиваем текст на логические секции
+  if (sections.length === 0 || sections.every(s => s.content.length < 100)) {
+    if (fullText.length > 0) {
+      // Стратегия 1: Разбиваем по заголовкам (если есть структура)
+      const headingPattern = /^(#{1,3}\s+.+|[А-ЯЁ][^\n]{5,100})$/gm;
+      const matches = [...fullText.matchAll(headingPattern)];
+      
+      if (matches.length > 2) {
+        // Есть заголовки, разбиваем по ним
+        let currentSection = '';
+        let currentTitle = 'Введение';
+        let sectionNum = 1;
+        
+        const lines = fullText.split('\n');
+        
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].trim();
+          
+          // Проверяем, это заголовок?
+          const isHeading = /^(#{1,3}\s+|[А-ЯЁ][^\n]{5,100}$)/.test(line) && 
+                           line.length < 100 && 
+                           !line.endsWith('.') &&
+                           !line.endsWith(',');
+          
+          if (isHeading && currentSection.length > 200) {
+            // Сохраняем предыдущую секцию
+            sections.push({
+              sectionNumber: sectionNum++,
+              title: currentTitle,
+              content: currentSection.trim(),
+              beforeVideo: currentSection.trim(),
+              afterVideo: '',
+              timestamp: new Date().toISOString()
+            });
+            
+            currentTitle = line.replace(/^#+\s*/, '');
+            currentSection = '';
+          } else {
+            currentSection += line + '\n';
+          }
+        }
+        
+        // Добавляем последнюю секцию
+        if (currentSection.trim().length > 200) {
+          sections.push({
+            sectionNumber: sectionNum,
+            title: currentTitle,
+            content: currentSection.trim(),
+            beforeVideo: currentSection.trim(),
+            afterVideo: '',
+            timestamp: new Date().toISOString()
+          });
+        }
+      } else {
+        // Стратегия 2: Разбиваем на равные части по ~2000 символов
+        const chunkSize = 2000;
+        const chunks: string[] = [];
+        
+        for (let i = 0; i < fullText.length; i += chunkSize) {
+          const chunk = fullText.slice(i, i + chunkSize);
+          if (chunk.trim().length > 100) {
+            chunks.push(chunk.trim());
+          }
+        }
+        
+        chunks.forEach((chunk, index) => {
+          // Извлекаем первую строку как заголовок
+          const firstLine = chunk.split('\n')[0].slice(0, 80);
+          const title = firstLine || `Часть ${index + 1}`;
+          
+          sections.push({
+            sectionNumber: index + 1,
+            title: title,
+            content: chunk,
+            beforeVideo: chunk,
+            afterVideo: '',
+            timestamp: new Date().toISOString()
+          });
+        });
+      }
+    }
+  }
+  
+  // Если все еще пусто, создаем одну секцию со всем текстом
+  if (sections.length === 0 && fullText.length > 100) {
+    sections.push({
+      sectionNumber: 1,
+      title: 'Содержание урока',
+      content: fullText,
+      beforeVideo: fullText,
+      afterVideo: '',
+      timestamp: new Date().toISOString()
+    });
+  }
+  
+  return sections;
 }
 
 /**
@@ -463,8 +600,113 @@ export async function getLessonContent(page: Page, lessonId: string): Promise<Le
   
   // Скриншоты отключены
   
-  // Измеряем объем текста ПОСЛЕ раскрытия
-  const fullText = await page.locator('.lesson-content, .training-content, .lesson-tab-content').innerText().catch(() => '');
+  // Измеряем объем текста ПОСЛЕ раскрытия через JavaScript
+  const fullText = await page.evaluate(() => {
+    // Приоритетные селекторы для контента урока
+    const contentSelectors = [
+      '.lesson-content',
+      '.training-content',
+      '.lesson-tab-content',
+      '.gc-page-content',
+      'main .content',
+      'article',
+      '.page-content'
+    ];
+    
+    for (const selector of contentSelectors) {
+      const element = document.querySelector(selector);
+      if (element) {
+        // Клонируем, чтобы не модифицировать реальный DOM
+        const clone = element.cloneNode(true) as HTMLElement;
+        
+        // Удаляем технические и навигационные элементы
+        const techSelectors = [
+          'script', 'style', 'noscript', 'iframe',
+          '.code-block', 'code', 'pre',
+          '[class*="ad-"]', '[class*="promo"]',
+          'header', 'nav', 'footer',
+          '.header', '.navigation', '.footer', '.sidebar', '.menu',
+          '.breadcrumbs', '.lesson-navigation', '.course-menu',
+          '[class*="button"]', '[class*="btn"]',
+          '.comment', '.comments', '[class*="social"]',
+          'form', 'input', 'textarea', 'select',
+          '[class*="support"]', '[class*="help"]',
+          '[data-lesson-navigation]', '[data-menu]'
+        ];
+        
+        techSelectors.forEach(sel => {
+          clone.querySelectorAll(sel).forEach(el => el.remove());
+        });
+        
+        // Получаем текст
+        let text = clone.textContent || '';
+        
+        // Удаляем навигационные фразы
+        const navPhrases = [
+          'Открыть в приложении',
+          'Действия',
+          'Написать в тех. поддержку',
+          'Список тренингов',
+          'Предыдущий урок',
+          'Следующий урок',
+          'Редактировать урок',
+          'Копировать урок',
+          'Удалить урок',
+          'Экспорт урока',
+          'Импорт урока',
+          'Перенести урок',
+          'Проверка заданий',
+          'Добавить файлы',
+          'Отправить ответ',
+          'Сохранить черновик',
+          'Показать все поля',
+          'максимальный размер файла'
+        ];
+        
+        navPhrases.forEach(phrase => {
+          text = text.replace(new RegExp(phrase, 'gi'), '');
+        });
+        
+        // Удаляем числа вида "35658", "1230" (ID элементов)
+        text = text.replace(/\b\d{4,6}\b/g, '');
+        
+        // Очистка от лишних пробелов и переносов
+        const cleaned = text
+          .replace(/\s+/g, ' ')  // Множественные пробелы → один
+          .replace(/\n{3,}/g, '\n\n')  // Множественные переносы → два
+          .split('\n')
+          .map(line => line.trim())
+          .filter(line => line.length > 0)
+          .join('\n')
+          .trim();
+        
+        // Фильтруем очень короткий контент
+        if (cleaned.length > 500) {
+          return cleaned;
+        }
+      }
+    }
+    
+    // Если не нашли, берем весь body, но убираем навигацию и футер
+    const body = document.body.cloneNode(true) as HTMLElement;
+    const elementsToRemove = [
+      'script', 'style', 'noscript', 'iframe',
+      'header', 'nav', 'footer', '.header', '.navigation', 
+      '.footer', '.sidebar', '.menu', '[class*="ad-"]',
+      'code', 'pre', '.code-block', 'form', 'input'
+    ];
+    
+    elementsToRemove.forEach(sel => {
+      body.querySelectorAll(sel).forEach(el => el.remove());
+    });
+    
+    const text = body.textContent || '';
+    return text
+      .replace(/\s+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  });
+  
   const textIncrease = fullText.length - textBefore.length;
   console.log(`   📄 Объем текста ПОСЛЕ раскрытия: ${fullText.length} символов (+${textIncrease})`);
   
@@ -546,11 +788,16 @@ export async function getLessonContent(page: Page, lessonId: string): Promise<Le
   console.log(`   ✅ Выжимка урока создана (${summary.length} символов)`);
   console.log(`   📝 Первые 150 символов: "${summary.substring(0, 150)}..."\n`);
   
+  // Создаем детальные секции для базы знаний
+  const detailedSections = createDetailedSections(videoSections, fullText);
+  console.log(`   📊 Создано ${detailedSections.length} детальных секций для базы знаний`);
+  
   return {
     lessonId,
     title,
     fullText,
     videoSections,
+    detailedSections,
     summary,
     imageUrls,
     fileUrls

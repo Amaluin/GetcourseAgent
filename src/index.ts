@@ -4,12 +4,21 @@ import { config } from './config';
 import { getUncheckedSubmissions, enrichSubmissionWithTaskDetails, postCommentAndVerdict } from './parser';
 import { checkHomework } from './ai';
 import { getLessonContent } from './lesson-parser';
+import * as GraphRAG from './graphrag/neo4j-client';
 
 const DRY_RUN = true; // ⚠️ Если true — мы только читаем и логируем, но не отправляем комментарии
+const USE_GRAPHRAG = process.env.GRAPHRAG_ENABLED === 'true'; // Включить GraphRAG
 
 async function main() {
   console.log('🤖 Запуск AI-агента GetCourse...');
   console.log(`🛠 Режим: ${DRY_RUN ? 'TEST (Без действий)' : 'LIVE (Боевой)'}`);
+  
+  // Инициализация GraphRAG (если включено)
+  let graphRAGActive = false;
+  if (USE_GRAPHRAG) {
+    console.log('🔮 Инициализация GraphRAG...');
+    graphRAGActive = await GraphRAG.initGraphRAG();
+  }
 
   const { page } = await initBrowser();
 
@@ -53,8 +62,39 @@ async function main() {
         console.log(`${'='.repeat(60)}`);
         
         try {
-          submission.lessonContent = await getLessonContent(page, submission.lessonId);
-          console.log(`✅ Урок успешно проанализирован!`);
+          // Проверяем, есть ли урок уже в GraphRAG
+          let lessonInGraph = false;
+          if (graphRAGActive) {
+            lessonInGraph = await GraphRAG.lessonExists(submission.lessonId);
+            if (lessonInGraph) {
+              console.log(`✅ Урок найден в GraphRAG (пропускаю повторный парсинг)`);
+            }
+          }
+          
+          // Парсим урок только если его нет в GraphRAG
+          if (!lessonInGraph) {
+            submission.lessonContent = await getLessonContent(page, submission.lessonId);
+            console.log(`✅ Урок успешно проанализирован!`);
+            
+            // Сохраняем урок в GraphRAG
+            if (graphRAGActive && submission.lessonContent) {
+              await GraphRAG.addLesson({
+                id: submission.lessonId,
+                title: submission.lessonContent.title,
+                content: submission.lessonContent.fullText,
+                summary: submission.lessonContent.summary,
+                videoUrls: submission.lessonContent.videoSections.map((v: any) => v.videoUrl),
+                imageUrls: submission.lessonContent.imageUrls,
+                detailedSections: submission.lessonContent.detailedSections
+              });
+              
+              // Извлекаем и добавляем концепции
+              await GraphRAG.extractAndAddConcepts(
+                submission.lessonId,
+                submission.lessonContent.fullText + ' ' + submission.lessonContent.summary
+              );
+            }
+          }
           
           // Возвращаемся в ленту ответов после просмотра урока
           console.log(`🔙 Возвращаюсь в ленту ответов...`);
@@ -74,11 +114,56 @@ async function main() {
       // ШАГ 2: Загружаем детали задания (идеальный ответ)
       await enrichSubmissionWithTaskDetails(submission, page);
 
-      // ШАГ 3: Спрашиваем AI (теперь с контекстом урока)
-      const feedback = await checkHomework(submission);
+      // ШАГ 3: Получаем контекст из GraphRAG (если включено)
+      let graphRAGContext = '';
+      if (graphRAGActive && submission.lessonId) {
+        console.log(`🔮 Получаю контекст из базы знаний...`);
+        graphRAGContext = await GraphRAG.getLessonContext(
+          submission.lessonId,
+          submission.text || ''
+        );
+        
+        // Получаем персональные рекомендации для студента
+        const recommendations = await GraphRAG.getStudentRecommendations(
+          submission.studentName,
+          submission.lessonId
+        );
+        if (recommendations) {
+          graphRAGContext += recommendations;
+        }
+      }
+
+      // ШАГ 4: Спрашиваем AI (теперь с контекстом из базы знаний)
+      const feedback = await checkHomework(submission, graphRAGContext);
       
       console.log(`🤖 Вердикт AI: ${feedback.status.toUpperCase()}`);
       console.log(`💬 Комментарий: "${feedback.comment}"`);
+
+      // Сохраняем работу студента в GraphRAG
+      if (graphRAGActive && submission.lessonId) {
+        await GraphRAG.addSubmission({
+          id: submission.id,
+          lessonId: submission.lessonId,
+          assignmentId: submission.assignmentTitle || 'unknown',
+          studentId: '', // Будет сгенерирован автоматически
+          studentName: submission.studentName,
+          text: submission.text || '',
+          status: feedback.status === 'accept' ? 'accepted' : 'rejected',
+          imageUrls: submission.imageUrls || []
+        });
+        
+        // Связываем работу с концепциями
+        await GraphRAG.linkSubmissionToConcepts(
+          submission.id,
+          submission.text || ''
+        );
+        
+        // Показываем статистику студента
+        const stats = await GraphRAG.getStudentStats(submission.studentName);
+        if (stats) {
+          console.log(`📊 Статистика студента: ${stats.accepted}/${stats.total} работ принято`);
+        }
+      }
 
       if (!DRY_RUN) {
         await postCommentAndVerdict(page, submission.id, feedback.comment, feedback.status);
@@ -93,6 +178,11 @@ async function main() {
   } catch (error) {
     console.error('🔥 Критическая ошибка:', error);
   } finally {
+    // Закрываем GraphRAG соединение
+    if (graphRAGActive) {
+      await GraphRAG.closeGraphRAG();
+    }
+    
     console.log('🏁 Работа завершена.');
     // В режиме отладки можно не закрывать браузер сразу, чтобы посмотреть результат
     if (config.headless) {

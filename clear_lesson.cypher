@@ -1,0 +1,2 @@
+﻿MATCH (l:Lesson {id: '339292840'})
+DETACH DELETE l

@@ -1,0 +1,27 @@
+{
+  "name": "getcourse-rag-system",
+  "version": "1.0.0",
+  "description": "GraphRAG система для GetCourse Agent с векторной БД Supabase",
+  "scripts": {
+    "test-connection": "ts-node test-connection.ts",
+    "build-knowledge": "ts-node knowledge-builder.example.ts",
+    "export-data": "ts-node scripts/export-data.ts",
+    "refresh-cache": "ts-node scripts/refresh-cache.ts",
+    "analytics": "ts-node scripts/analytics.ts"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "openai": "^4.38.2",
+    "groq-sdk": "^0.3.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.7",
+    "typescript": "^5.4.5",
+    "ts-node": "^10.9.2"
+  }
+}
+
+
+
+

@@ -8,7 +8,11 @@
     "start": "ts-node src/index.ts",
     "debug": "ts-node src/debug-interactive.ts",
     "inspect": "ts-node src/debug-click-inspector.ts",
-    "find-arrows": "ts-node src/find-arrows.ts"
+    "find-arrows": "ts-node src/find-arrows.ts",
+    "search": "ts-node src/search-knowledge.ts",
+    "clear-kb": "ts-node src/clear-lessons.ts",
+    "inspect-kb": "ts-node src/inspect-sections.ts",
+    "visualize-graph": "ts-node src/visualize-graph.ts"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +24,7 @@
     "adm-zip": "^0.5.16",
     "axios": "^1.13.2",
     "dotenv": "^17.2.3",
+    "neo4j-driver": "^6.0.1",
     "openai": "^6.9.1",
     "playwright": "^1.56.1",
     "ts-node": "^10.9.2",
@@ -28,6 +33,7 @@
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.7",
-    "@types/uuid": "^10.0.0"
+    "@types/uuid": "^10.0.0",
+    "supabase": "^2.58.5"
   }
 }
