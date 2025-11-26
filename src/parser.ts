@@ -61,138 +61,234 @@ export async function getUncheckedSubmissions(page: Page): Promise<HomeworkSubmi
       console.log(`         ✅ Имя получено за ${nameTime}ms: ${studentName}`);
       
       console.log(`      🔗 ШАГ 3: Получаю ссылку на профиль студента...`);
-      console.log(`         ⏳ Получаю href из атрибута ссылки...`);
+      console.log(`         ⏳ Ищу ссылку через JavaScript...`);
       const linkStartTime = Date.now();
       let studentUrl: string | undefined = undefined;
       
       try {
-        // Сначала пробуем получить href напрямую (самый надежный способ)
-        const profileLink = wrapper.locator('.user-profile-link').first();
-        const href = await profileLink.getAttribute('href').catch(() => null);
+        // Используем JavaScript для поиска ссылки внутри wrapper
+        // Структура: .user-profile-link содержит <a> или сам является ссылкой
+        const linkInfo = await wrapper.evaluate((element) => {
+          // Вариант 1: Ищем <a> внутри .user-profile-link
+          const linkElement = element.querySelector('.user-profile-link a');
+          if (linkElement) {
+            const href = linkElement.getAttribute('href');
+            const text = linkElement.textContent || '';
+            return { href, text, type: 'a_inside' };
+          }
+          
+          // Вариант 2: Сам .user-profile-link является ссылкой
+          const profileLink = element.querySelector('.user-profile-link');
+          if (profileLink) {
+            const href = profileLink.getAttribute('href');
+            const text = profileLink.textContent || '';
+            // Проверяем, является ли элемент <a>
+            if (profileLink.tagName === 'A' && href) {
+              return { href, text, type: 'a_element' };
+            }
+            // Или имеет data-атрибут
+            const dataHref = (profileLink as HTMLElement).getAttribute('data-href') || 
+                           (profileLink as HTMLElement).getAttribute('data-url');
+            if (dataHref) {
+              return { href: dataHref, text, type: 'data_attr' };
+            }
+            if (href) {
+              return { href, text, type: 'href_attr' };
+            }
+          }
+          
+          // Вариант 3: Ищем родительский <a> для .user-profile-link
+          // Структура может быть: <a class="user-profile-link"><span class="text">Имя</span></a>
+          if (profileLink) {
+            let parent = profileLink.parentElement;
+            // Поднимаемся по дереву до 3 уровней
+            for (let i = 0; i < 3 && parent; i++) {
+              if (parent.tagName === 'A') {
+                const parentHref = parent.getAttribute('href');
+                if (parentHref) {
+                  return { href: parentHref, text: profileLink.textContent || '', type: 'parent_a' };
+                }
+              }
+              parent = parent.parentElement;
+            }
+          }
+          
+          // Вариант 4: Ищем любой <a> в wrapper, который содержит "user" в href
+          const allLinks = element.querySelectorAll('a');
+          for (const link of allLinks) {
+            const href = link.getAttribute('href');
+            if (href && (href.includes('user') || href.includes('profile'))) {
+              return { href, text: link.textContent || '', type: 'user_link' };
+            }
+          }
+          
+          return { href: null, text: '', type: 'not_found' };
+        });
         
-        if (href) {
+        console.log(`         🔍 Результат поиска:`);
+        console.log(`            Тип: ${linkInfo.type}`);
+        console.log(`            Href: ${linkInfo.href || 'не найден'}`);
+        console.log(`            Текст: ${linkInfo.text.substring(0, 50)}`);
+        
+        if (linkInfo.href) {
           // Формируем полный URL
-          if (href.startsWith('http://') || href.startsWith('https://')) {
-            studentUrl = href;
-          } else if (href.startsWith('/')) {
-            // Относительный путь от корня
-            studentUrl = `${config.gcUrl}${href}`;
+          if (linkInfo.href.startsWith('http://') || linkInfo.href.startsWith('https://')) {
+            studentUrl = linkInfo.href;
+          } else if (linkInfo.href.startsWith('/')) {
+            studentUrl = `${config.gcUrl}${linkInfo.href}`;
           } else {
-            // Относительный путь
             const currentUrl = page.url();
             const baseUrl = currentUrl.split('/').slice(0, 3).join('/');
-            studentUrl = `${baseUrl}/${href}`;
+            studentUrl = `${baseUrl}/${linkInfo.href}`;
           }
-          console.log(`         ✅ URL из href атрибута: ${studentUrl}`);
+          console.log(`         ✅ URL сформирован: ${studentUrl}`);
+        }
+        
+        // Если не получили через JS, пробуем через Playwright
+        if (!studentUrl) {
+          console.log(`         ⚠️  JavaScript не нашел href, пробую через Playwright...`);
           
-          // Проверяем, что это действительно ссылка на профиль (не на ленту ответов)
-          if (studentUrl.includes('/user/') || studentUrl.includes('/profile/') || studentUrl.includes('user_id') || studentUrl.includes('user=')) {
-            console.log(`         ✅ Это ссылка на профиль студента`);
-          } else {
-            console.log(`         ⚠️  Похоже, это не ссылка на профиль, пробую кликнуть для проверки...`);
+          // Пробуем найти <a> внутри .user-profile-link
+          const linkInside = wrapper.locator('.user-profile-link a').first();
+          const countInside = await linkInside.count().catch(() => 0);
+          
+          if (countInside > 0) {
+            const href = await linkInside.getAttribute('href').catch(() => null);
+            if (href) {
+              studentUrl = href.startsWith('http') ? href : (href.startsWith('/') ? `${config.gcUrl}${href}` : `${config.gcUrl}/${href}`);
+              console.log(`         ✅ URL из <a> внутри .user-profile-link: ${studentUrl}`);
+            }
+          }
+          
+          // Если не нашли, пробуем сам .user-profile-link
+          if (!studentUrl) {
+            const profileLink = wrapper.locator('.user-profile-link').first();
+            const href = await profileLink.getAttribute('href').catch(() => null);
             
-            // Если href выглядит подозрительно, пробуем кликнуть и проверить URL
-            const currentUrl = page.url();
-            console.log(`         📍 Текущий URL перед кликом: ${currentUrl}`);
-            
+            if (href) {
+              studentUrl = href.startsWith('http') ? href : (href.startsWith('/') ? `${config.gcUrl}${href}` : `${config.gcUrl}/${href}`);
+              console.log(`         ✅ URL из .user-profile-link: ${studentUrl}`);
+            }
+          }
+        }
+        
+        // Если все еще нет URL, пробуем кликнуть на элемент с именем
+        if (!studentUrl) {
+          console.log(`         ⚠️  Href не найден, пробую кликнуть на элемент с именем...`);
+          const currentUrl = page.url();
+          console.log(`         📍 Текущий URL: ${currentUrl}`);
+          
+          // Пробуем кликнуть на .user-profile-link или на span.text внутри него
+          const nameElement = wrapper.locator('.user-profile-link .text').first();
+          const profileLink = wrapper.locator('.user-profile-link').first();
+          
+          const isNameVisible = await nameElement.isVisible({ timeout: 2000 }).catch(() => false);
+          const isLinkVisible = await profileLink.isVisible({ timeout: 2000 }).catch(() => false);
+          
+          if (isNameVisible || isLinkVisible) {
+            console.log(`         👆 Кликаю на элемент профиля...`);
             try {
-              // Кликаем с ожиданием навигации
-              await Promise.all([
+              // Пробуем кликнуть на родительский элемент (ссылку)
+              const elementToClick = isLinkVisible ? profileLink : nameElement;
+              
+              // Кликаем и ждем навигации
+              await Promise.race([
                 page.waitForURL(url => {
                   const newUrl = url.toString();
-                  return newUrl !== currentUrl && 
-                         (newUrl.includes('/user/') || 
-                          newUrl.includes('/profile/') || 
-                          newUrl.includes('user_id') || 
-                          newUrl.includes('user='));
-                }, { timeout: 3000 }).catch(() => null),
-                profileLink.click({ timeout: 3000 })
+                  return newUrl !== currentUrl && !newUrl.includes('unanswered');
+                }, { timeout: 5000 }).catch(() => null),
+                elementToClick.click({ timeout: 5000 })
               ]);
               
-              // Ждем загрузки
-              await page.waitForTimeout(1000);
+              await page.waitForTimeout(2000);
               
-              // Проверяем новый URL
               const newUrl = page.url();
               console.log(`         📍 URL после клика: ${newUrl}`);
               
-              if (newUrl !== currentUrl && 
-                  (newUrl.includes('/user/') || 
-                   newUrl.includes('/profile/') || 
-                   newUrl.includes('user_id') || 
-                   newUrl.includes('user='))) {
-                studentUrl = newUrl;
-                console.log(`         ✅ URL профиля получен через навигацию: ${studentUrl}`);
-                
-                // Возвращаемся назад
-                console.log(`         🔙 Возвращаюсь назад...`);
-                await page.goBack({ waitUntil: 'domcontentloaded' });
-                await page.waitForTimeout(1000);
-                console.log(`         ✅ Вернулся на страницу с заданиями`);
+              if (newUrl !== currentUrl && !newUrl.includes('unanswered')) {
+                // Проверяем, что это профиль
+                if (newUrl.includes('/user/') || 
+                    newUrl.includes('/profile/') || 
+                    newUrl.includes('user_id') || 
+                    newUrl.includes('user=') ||
+                    newUrl.includes('/pl/teach/control/user') ||
+                    newUrl.includes('/teach/control/user')) {
+                  studentUrl = newUrl;
+                  console.log(`         ✅ URL профиля получен через клик: ${studentUrl}`);
+                  
+                  // Возвращаемся назад
+                  console.log(`         🔙 Возвращаюсь назад...`);
+                  await page.goBack({ waitUntil: 'domcontentloaded' });
+                  await page.waitForTimeout(1500);
+                  console.log(`         ✅ Вернулся на страницу с заданиями`);
+                } else {
+                  console.log(`         ⚠️  URL изменился, но это не профиль: ${newUrl}`);
+                  // Возвращаемся назад
+                  await page.goBack({ waitUntil: 'domcontentloaded' });
+                  await page.waitForTimeout(1000);
+                }
               } else {
-                console.log(`         ⚠️  URL не изменился на профиль, используем href: ${studentUrl}`);
+                console.log(`         ⚠️  URL не изменился или вернулся на ленту ответов`);
               }
-            } catch (clickError) {
-              console.log(`         ⚠️  Ошибка при клике, используем href: ${studentUrl}`);
+            } catch (clickError: any) {
+              console.log(`         ⚠️  Ошибка при клике: ${clickError.message || clickError}`);
             }
-          }
-        } else {
-          console.log(`         ⚠️  Href не найден, пробую кликнуть...`);
-          
-          // Если href нет, пробуем кликнуть
-          const currentUrl = page.url();
-          const isVisible = await profileLink.isVisible({ timeout: 2000 }).catch(() => false);
-          
-          if (isVisible) {
-            try {
-              await Promise.all([
-                page.waitForURL(url => {
-                  const newUrl = url.toString();
-                  return newUrl !== currentUrl && 
-                         (newUrl.includes('/user/') || 
-                          newUrl.includes('/profile/') || 
-                          newUrl.includes('user_id') || 
-                          newUrl.includes('user='));
-                }, { timeout: 5000 }).catch(() => null),
-                profileLink.click({ timeout: 5000 })
-              ]);
-              
-              await page.waitForTimeout(1500);
-              
-              const newUrl = page.url();
-              if (newUrl !== currentUrl && 
-                  (newUrl.includes('/user/') || 
-                   newUrl.includes('/profile/') || 
-                   newUrl.includes('user_id') || 
-                   newUrl.includes('user='))) {
-                studentUrl = newUrl;
-                console.log(`         ✅ URL профиля получен: ${studentUrl}`);
-                
-                // Возвращаемся назад
-                await page.goBack({ waitUntil: 'domcontentloaded' });
-                await page.waitForTimeout(1000);
-              }
-            } catch (error) {
-              console.log(`         ❌ Не удалось получить URL через клик`);
-            }
+          } else {
+            console.log(`         ⚠️  Элемент профиля не виден`);
           }
         }
       } catch (error: any) {
         console.log(`         ⚠️  Ошибка при получении ссылки: ${error.message || error}`);
+        console.log(`         📋 Stack: ${error.stack}`);
       }
       
       const linkTime = Date.now() - linkStartTime;
       console.log(`         ⏱️  Время получения ссылки: ${linkTime}ms`);
       if (studentUrl) {
         // Финальная проверка, что это не лента ответов
-        if (studentUrl.includes('/answers/') || studentUrl.includes('/stream/')) {
+        if (studentUrl.includes('/answers/') || studentUrl.includes('/stream/') || studentUrl.includes('unanswered')) {
           console.log(`         ⚠️  ВНИМАНИЕ: Получен URL ленты ответов вместо профиля!`);
           studentUrl = undefined;
         } else {
           console.log(`         🔗 Финальный URL профиля: ${studentUrl}`);
+          
+          // Пробуем извлечь ID для проверки
+          const idPatterns = [
+            /(?:user[\/=]|id[=:]|user_id[=:])(\d+)/i,
+            /\/user\/(\d+)/i,
+            /user_id=(\d+)/i,
+            /user=(\d+)/i,
+            /\/pl\/teach\/control\/user\/view\?id=(\d+)/i,
+            /\/teach\/control\/user\/view\?id=(\d+)/i
+          ];
+          
+          for (const pattern of idPatterns) {
+            const match = studentUrl.match(pattern);
+            if (match && match[1]) {
+              console.log(`         🆔 GetCourse ID извлечен: ${match[1]}`);
+              break;
+            }
+          }
         }
       } else {
-        console.log(`         ⚠️  Ссылка на профиль не найдена`);
+        console.log(`         ❌ Ссылка на профиль не найдена`);
+        console.log(`         💡 Попробую получить через дополнительный поиск...`);
+        
+        // Последняя попытка: ищем все ссылки в wrapper
+        try {
+          const allLinks = await wrapper.locator('a').all();
+          for (const link of allLinks) {
+            const href = await link.getAttribute('href').catch(() => null);
+            const text = await link.innerText().catch(() => '');
+            if (href && (href.includes('user') || href.includes('profile'))) {
+              studentUrl = href.startsWith('http') ? href : (href.startsWith('/') ? `${config.gcUrl}${href}` : `${config.gcUrl}/${href}`);
+              console.log(`         ✅ Найдена ссылка через поиск всех <a>: ${studentUrl}`);
+              break;
+            }
+          }
+        } catch (e) {
+          console.log(`         ❌ Дополнительный поиск не дал результатов`);
+        }
       }
       
       // Текст ответа - быстрая проверка через JavaScript

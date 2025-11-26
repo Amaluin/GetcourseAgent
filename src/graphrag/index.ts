@@ -150,6 +150,20 @@ export class GraphRAG {
   }
 
   /**
+   * Проверка существования студента в GraphRAG
+   */
+  async hasStudent(studentId: string): Promise<boolean> {
+    return await this.neo4jClient.studentExists(studentId);
+  }
+
+  /**
+   * Получение списка уроков, пройденных студентом
+   */
+  async getStudentLessons(studentId: string): Promise<string[]> {
+    return await this.neo4jClient.getStudentLessons(studentId);
+  }
+
+  /**
    * 2. ДОБАВЛЕНИЕ СТУДЕНТА
    */
   async addStudent(

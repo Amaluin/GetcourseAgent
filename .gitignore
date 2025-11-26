@@ -6,4 +6,5 @@ debug_screenshot.png
 debug_source.html
 dist/
 *.log
+.vscode/
 

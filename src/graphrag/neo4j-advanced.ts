@@ -205,6 +205,47 @@ export class Neo4jAdvancedClient {
   }
 
   /**
+   * Проверка существования студента в GraphRAG
+   */
+  async studentExists(studentId: string): Promise<boolean> {
+    const session = this.driver.session();
+    try {
+      const result = await session.run(
+        `MATCH (s:Student {id: $studentId}) RETURN s`,
+        { studentId }
+      );
+      return result.records.length > 0;
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * Получение информации о студенте (какие уроки он прошел)
+   */
+  async getStudentLessons(studentId: string): Promise<string[]> {
+    const session = this.driver.session();
+    try {
+      const result = await session.run(
+        `
+        MATCH (s:Student {id: $studentId})-[:COMPLETED]->(l:Lesson)
+        RETURN collect(l.id) as lessonIds
+        `,
+        { studentId }
+      );
+      
+      if (result.records.length === 0) {
+        return [];
+      }
+      
+      const lessonIds = result.records[0].get('lessonIds');
+      return lessonIds || [];
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
    * 2. ТРЕКИНГ СТУДЕНТОВ - Создание/обновление профиля студента
    */
   async addOrUpdateStudent(

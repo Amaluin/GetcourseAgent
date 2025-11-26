@@ -309,10 +309,23 @@ export async function checkHomework(submission: HomeworkSubmission, graphRAGCont
   const studentText = submission.text.length > MAX_STUDENT_TEXT_LENGTH
     ? submission.text.substring(0, MAX_STUDENT_TEXT_LENGTH) + '... [обрезано]'
     : submission.text;
-  prompt += `\n\nОтвет студента:\n"${studentText}"`;
   
-  if (submission.text.length > MAX_STUDENT_TEXT_LENGTH) {
-    console.log(`   ⚠️  Ответ студента обрезан с ${submission.text.length} до ${MAX_STUDENT_TEXT_LENGTH} символов`);
+  // Проверяем, есть ли у студента данные (скриншоты, файлы), даже если нет текста
+  const hasData = submission.text.trim().length > 0 || submission.imageUrls.length > 0 || submission.fileUrls.length > 0;
+  
+  if (submission.text.trim().length > 0) {
+    prompt += `\n\nОтвет студента (текст):\n"${studentText}"`;
+    if (submission.text.length > MAX_STUDENT_TEXT_LENGTH) {
+      console.log(`   ⚠️  Ответ студента обрезан с ${submission.text.length} до ${MAX_STUDENT_TEXT_LENGTH} символов`);
+    }
+  } else {
+    prompt += `\n\nОтвет студента (текст): [Текстовый комментарий отсутствует]`;
+    console.log(`   ℹ️  Студент не написал текстовый комментарий`);
+    
+    if (hasData) {
+      prompt += `\n\n⚠️ ВАЖНО: Студент НЕ написал текстовый комментарий, но предоставил другие данные (скриншоты, файлы). Это НЕ ошибка - считай, что задание выполнено через предоставленные материалы!`;
+      console.log(`   ✅ Но есть другие данные: ${submission.imageUrls.length} скриншотов, ${submission.fileUrls.length} файлов`);
+    }
   }
 
   // Проверяем наличие ссылок в ответе студента
@@ -320,37 +333,75 @@ export async function checkHomework(submission: HomeworkSubmission, graphRAGCont
   const linksInText = submission.text.match(urlPattern) || [];
   const hasLinks = linksInText.length > 0;
   
-  // Проверяем, требуется ли ссылка в задании
+  // Проверяем наличие файлов и скриншотов
+  const hasFiles = submission.fileUrls.length > 0;
+  const hasImages = submission.imageUrls.length > 0;
+  const hasZip = submission.fileUrls.some(url => url.toLowerCase().endsWith('.zip'));
+  
+  // Проверяем, требуется ли ссылка/файлы/скриншоты в задании
   const taskText = (submission.taskDescription || '') + (submission.idealAnswer || '');
-  const requiresLink = /(ссылка|link|url|http|https|адрес|сайт|страница|проект|приложение|деплой|deploy)/i.test(taskText);
+  const requiresLink = /(ссылка|link|url|http|https|адрес|сайт|страница|проект|приложение|деплой|deploy|github|репозиторий|repository)/i.test(taskText);
+  const requiresFiles = /(файл|file|архив|archive|zip|проект|project)/i.test(taskText);
+  const requiresScreenshots = /(скриншот|screenshot|скрин|screenshot|изображение|image|фото|photo|картинка)/i.test(taskText);
   
-  console.log(`   🔗 Проверка ссылок:`);
-  console.log(`      Требуется ссылка в задании: ${requiresLink ? '✅ Да' : '❌ Нет'}`);
-  console.log(`      Найдено ссылок в ответе: ${linksInText.length}`);
-  if (linksInText.length > 0) {
-    console.log(`      Ссылки: ${linksInText.slice(0, 3).join(', ')}${linksInText.length > 3 ? '...' : ''}`);
-  }
+  // Проверяем, есть ли в задании варианты через "ИЛИ" (или, or, либо)
+  const hasOrOptions = /(или|or|либо|\||\/)/i.test(taskText);
   
-  // Добавляем информацию о ссылках в промпт
-  if (requiresLink) {
-    if (hasLinks) {
-      prompt += `\n\n=== ССЫЛКИ В ОТВЕТЕ СТУДЕНТА ===`;
-      prompt += `\nСтудент предоставил ${linksInText.length} ссылку(и):`;
-      linksInText.forEach((link, i) => {
-        prompt += `\n${i + 1}. ${link}`;
-      });
-      prompt += `\n=== КОНЕЦ СПИСКА ССЫЛОК ===`;
-    } else {
-      prompt += `\n\n⚠️ ВАЖНО: В задании требуется ссылка, но студент НЕ предоставил ссылку в ответе!`;
-      prompt += `\nЭто является ошибкой - студент не выполнил требование задания.`;
+  console.log(`   📋 Проверка формата сдачи:`);
+  console.log(`      Требуется ссылка: ${requiresLink ? '✅ Да' : '❌ Нет'}`);
+  console.log(`      Требуются файлы: ${requiresFiles ? '✅ Да' : '❌ Нет'}`);
+  console.log(`      Требуются скриншоты: ${requiresScreenshots ? '✅ Да' : '❌ Нет'}`);
+  console.log(`      Есть варианты через "ИЛИ": ${hasOrOptions ? '✅ Да' : '❌ Нет'}`);
+  console.log(`      Студент предоставил:`);
+  console.log(`         - Ссылок: ${linksInText.length}`);
+  console.log(`         - Файлов: ${submission.fileUrls.length}`);
+  console.log(`         - Скриншотов: ${submission.imageUrls.length}`);
+  
+  // Определяем, выполнил ли студент требование
+  const hasProvidedSomething = hasLinks || hasFiles || hasImages;
+  const requirementMet = (requiresLink && hasLinks) || 
+                         (requiresFiles && hasFiles) || 
+                         (requiresScreenshots && hasImages) ||
+                         (hasOrOptions && hasProvidedSomething); // Если есть "ИЛИ", достаточно одного варианта
+  
+  // Добавляем информацию в промпт
+  if (requiresLink || requiresFiles || requiresScreenshots) {
+    prompt += `\n\n=== ФОРМАТ СДАЧИ ===`;
+    prompt += `\nТребования из задания:`;
+    if (requiresLink) prompt += `\n- Ссылка (GitHub, репозиторий, проект)`;
+    if (requiresFiles) prompt += `\n- Файлы/архив проекта`;
+    if (requiresScreenshots) prompt += `\n- Скриншоты`;
+    if (hasOrOptions) {
+      prompt += `\n\n⚠️ ВАЖНО: В задании указаны варианты через "ИЛИ" - достаточно предоставить ОДИН из вариантов!`;
     }
-  } else if (hasLinks) {
-    prompt += `\n\n=== ССЫЛКИ В ОТВЕТЕ СТУДЕНТА ===`;
-    prompt += `\nСтудент предоставил ${linksInText.length} ссылку(и) (хотя в задании не требовалось):`;
-    linksInText.forEach((link, i) => {
-      prompt += `\n${i + 1}. ${link}`;
-    });
-    prompt += `\n=== КОНЕЦ СПИСКА ССЫЛОК ===`;
+    
+    prompt += `\n\nЧто предоставил студент:`;
+    if (hasLinks) {
+      prompt += `\n✅ Ссылки (${linksInText.length}):`;
+      linksInText.slice(0, 5).forEach((link, i) => {
+        prompt += `\n   ${i + 1}. ${link}`;
+      });
+    }
+    if (hasFiles) {
+      prompt += `\n✅ Файлы (${submission.fileUrls.length}):`;
+      submission.fileUrls.slice(0, 5).forEach((file, i) => {
+        const fileName = file.split('/').pop() || file;
+        prompt += `\n   ${i + 1}. ${fileName}`;
+      });
+    }
+    if (hasImages) {
+      prompt += `\n✅ Скриншоты (${submission.imageUrls.length})`;
+    }
+    
+    if (!hasProvidedSomething) {
+      prompt += `\n❌ Студент НЕ предоставил ни одного из требуемых вариантов!`;
+    } else if (hasOrOptions && hasProvidedSomething) {
+      prompt += `\n✅ Студент предоставил хотя бы один вариант - требование выполнено!`;
+    } else if (!requirementMet) {
+      prompt += `\n⚠️ Студент предоставил не то, что требовалось в задании.`;
+    }
+    
+    prompt += `\n=== КОНЕЦ ПРОВЕРКИ ФОРМАТА СДАЧИ ===`;
   }
 
   // Анализируем JSON и ZIP файлы
@@ -431,14 +482,18 @@ export async function checkHomework(submission: HomeworkSubmission, graphRAGCont
     0. СНАЧАЛА изучи ВЫЖИМКУ УРОКА (если есть) — это то, что студент изучал перед выполнением задания. Используй эти знания для понимания контекста.
     1. ВНИМАТЕЛЬНО прочитай ТЕКСТ ЗАДАНИЯ и ИДЕАЛЬНЫЙ ОТВЕТ выше, чтобы точно понять, что от студента требуется.
     2. Прочитай ОТВЕТ СТУДЕНТА. Если студент задает ВОПРОС или просит помощи - обязательно ответь на него в комментарии.
+    2.1. ВАЖНО: Если студент НЕ написал текстовый комментарий, но предоставил скриншоты, файлы или другие данные - это НЕ ошибка! Считай, что задание выполнено через предоставленные материалы. Не требуй обязательного текстового комментария!
     3. Проверь, выполнил ли студент КОНКРЕТНЫЕ требования из ТЕКСТА ЗАДАНИЯ, сравнивая с тем, что объяснялось в УРОКЕ:
        - Если в ТЕКСТЕ ЗАДАНИЯ явно требуется JSON файл - проанализируй его содержимое.
        - Если в ТЕКСТЕ ЗАДАНИЯ явно требуются скриншоты - проверь их наличие и содержимое.
        - Если в ТЕКСТЕ ЗАДАНИЯ требуется текстовый ответ - оцени его.
-       - КРИТИЧЕСКИ ВАЖНО: Если в ТЕКСТЕ ЗАДАНИЯ требуется ссылка (ссылка, link, url, адрес, сайт, проект, приложение, деплой) - проверь её наличие в ответе студента. Если ссылка НЕ предоставлена - это ОШИБКА, отклони работу и укажи это в комментарии!
+       - КРИТИЧЕСКИ ВАЖНО: Если в ТЕКСТЕ ЗАДАНИЯ указаны варианты формата сдачи через "ИЛИ" (например: "ссылка ИЛИ скриншоты ИЛИ архив") - достаточно, чтобы студент предоставил ОДИН из вариантов! Не требуй все варианты сразу!
+       - КРИТИЧЕСКИ ВАЖНО: Если в ТЕКСТЕ ЗАДАНИЯ требуется ссылка (ссылка, link, url, адрес, сайт, проект, приложение, деплой, GitHub, репозиторий) - проверь её наличие в ответе студента. Если ссылка НЕ предоставлена И нет других вариантов через "ИЛИ" - это ОШИБКА, отклони работу и укажи это в комментарии!
+       - ВАЖНО: Если студент предоставил скриншоты, файлы или другие данные, но НЕ написал текстовый комментарий - это НЕ ошибка! Считай, что студент выполнил задание через предоставленные материалы. Не требуй обязательного текстового комментария, если есть другие данные!
        - НЕ ПРИДУМЫВАЙ требования, которых нет в тексте задания!
     4. Сравни ответ студента с ИДЕАЛЬНЫМ ОТВЕТОМ (если он указан).
     5. ВАЖНО: Если студент прислал скриншоты, на которых ВИДНО выполненное задание - СЧИТАЙ ЭТО ЗАЧЕТОМ, даже если формально просили текст или ссылку. Главное - суть: работа выполнена.
+    5.1. ВАЖНО: Если студент предоставил скриншоты, файлы, архив или другие данные, но НЕ написал текстовый комментарий - это НЕ ошибка! Считай, что студент выполнил задание через предоставленные материалы. Не требуй обязательного текстового комментария!
     6. КРИТИЧЕСКИ ВАЖНО: Требуй только то, что ЯВНО указано в тексте задания. Не добавляй свои требования! Если в тексте задания не написано "прикрепите скриншот" - ЗНАЧИТ ОН НЕ НУЖЕН.
     7. Если прикреплен JSON файл (или содержимое ZIP архива) - внимательно проанализируй его структуру, поля, значения.
     8. Если ответ выполняет ВСЕ требования из ТЕКСТА ЗАДАНИЯ — ПРИНЯТЬ. Если в задании нет требования скриншотов, а студент прислал только JSON - ЭТО НОРМАЛЬНО, ПРИНИМАЙ.

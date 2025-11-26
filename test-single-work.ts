@@ -163,32 +163,7 @@ async function main() {
           }
         }
         
-        // Добавляем студента и отмечаем урок как пройденный (вне зависимости от парсинга)
-        if (graphRAG) {
-          const studentId = `student_${Buffer.from(submission.studentName).toString('base64').slice(0, 16)}`;
-          
-          // Извлекаем ID из URL если есть
-          let gcId: string | undefined;
-          if (submission.studentUrl) {
-            const idMatch = submission.studentUrl.match(/(?:user[\/=]|id[=:]|user_id[=:])(\d+)/i);
-            if (idMatch) {
-              gcId = idMatch[1];
-            }
-          }
-          
-          await graphRAG.addStudent(studentId, submission.studentName, undefined, gcId, submission.studentUrl);
-          console.log(`   ✅ Студент добавлен: ${submission.studentName}`);
-          if (submission.studentUrl) {
-            console.log(`      🔗 Ссылка: ${submission.studentUrl}`);
-          }
-          if (gcId) {
-            console.log(`      🆔 GetCourse ID: ${gcId}`);
-          }
-          
-          // Отмечаем урок как пройденный
-          await graphRAG.markLessonCompleted(studentId, submission.lessonId);
-          console.log(`   ✅ Урок отмечен как пройденный`);
-        }
+        // Примечание: Студент будет проверен и обновлен в ШАГ 2 (перед проверкой задания)
         
         // Возвращаемся в ленту
         console.log(`\n🔙 Возвращаюсь в ленту ответов...`);
@@ -204,9 +179,108 @@ async function main() {
       console.log('⚠️  ID урока не найден, пропускаю анализ урока\n');
     }
 
-    // ШАГ 2: Загрузка деталей задания
+    // ШАГ 2: Проверка и обновление студента в GraphRAG (ПЕРЕД проверкой задания)
     console.log('='.repeat(70));
-    console.log('📋 ШАГ 2: ДЕТАЛИ ЗАДАНИЯ');
+    console.log('👤 ШАГ 2: ПРОВЕРКА И ОБНОВЛЕНИЕ СТУДЕНТА В GRAPHRAG');
+    console.log('='.repeat(70));
+    
+    if (graphRAG) {
+      const studentId = `student_${Buffer.from(submission.studentName).toString('base64').slice(0, 16)}`;
+      
+      // Извлекаем ID из URL если есть
+      let gcId: string | undefined;
+      if (submission.studentUrl) {
+        console.log(`\n🔍 Извлекаю GetCourse ID из URL: ${submission.studentUrl}`);
+        const patterns = [
+          /(?:user[\/=]|id[=:]|user_id[=:])(\d+)/i,
+          /\/user\/(\d+)/i,
+          /user_id=(\d+)/i,
+          /user=(\d+)/i,
+          /\/pl\/teach\/control\/user\/view\?id=(\d+)/i,
+          /\/teach\/control\/user\/view\?id=(\d+)/i
+        ];
+        
+        for (const pattern of patterns) {
+          const match = submission.studentUrl.match(pattern);
+          if (match && match[1]) {
+            gcId = match[1];
+            console.log(`   ✅ GetCourse ID найден: ${gcId}`);
+            break;
+          }
+        }
+        
+        if (!gcId) {
+          console.log(`   ⚠️  Не удалось извлечь ID из URL`);
+        }
+      } else {
+        console.log(`   ⚠️  Ссылка на профиль студента отсутствует`);
+      }
+      
+      // Проверяем, существует ли студент
+      console.log(`\n🔍 Проверяю, есть ли студент в GraphRAG...`);
+      const studentExists = await graphRAG.hasStudent(studentId);
+      
+      if (studentExists) {
+        console.log(`   ✅ Студент найден в GraphRAG`);
+        
+        // Получаем список пройденных уроков
+        const completedLessons = await graphRAG.getStudentLessons(studentId);
+        console.log(`   📚 Уроков пройдено: ${completedLessons.length}`);
+        
+        // Проверяем, проходил ли студент этот урок (если есть ID урока)
+        if (submission.lessonId) {
+          const hasThisLesson = completedLessons.includes(submission.lessonId);
+          
+          if (!hasThisLesson) {
+            console.log(`   📖 Этот урок еще не пройден, добавляю...`);
+            await graphRAG.markLessonCompleted(studentId, submission.lessonId);
+            console.log(`   ✅ Урок добавлен к пройденным`);
+          } else {
+            console.log(`   ℹ️  Этот урок уже был пройден ранее`);
+          }
+        }
+        
+        // Обновляем информацию о студенте (ссылка, ID)
+        console.log(`   🔄 Обновляю информацию о студенте...`);
+        await graphRAG.addStudent(studentId, submission.studentName, undefined, gcId, submission.studentUrl);
+        console.log(`   ✅ Информация обновлена`);
+        if (submission.studentUrl) {
+          console.log(`      🔗 Ссылка: ${submission.studentUrl}`);
+        }
+        if (gcId) {
+          console.log(`      🆔 GetCourse ID: ${gcId}`);
+        }
+      } else {
+        console.log(`   ❌ Студент не найден в GraphRAG, создаю нового...`);
+        
+        // Создаем нового студента
+        await graphRAG.addStudent(studentId, submission.studentName, undefined, gcId, submission.studentUrl);
+        console.log(`   ✅ Студент создан:`);
+        console.log(`      Имя: ${submission.studentName}`);
+        if (submission.studentUrl) {
+          console.log(`      🔗 Ссылка: ${submission.studentUrl}`);
+        } else {
+          console.log(`      🔗 Ссылка: не указана`);
+        }
+        if (gcId) {
+          console.log(`      🆔 GetCourse ID: ${gcId}`);
+        } else {
+          console.log(`      🆔 GetCourse ID: не найден`);
+        }
+        
+        // Отмечаем урок как пройденный (если есть ID урока)
+        if (submission.lessonId) {
+          await graphRAG.markLessonCompleted(studentId, submission.lessonId);
+          console.log(`   ✅ Урок отмечен как пройденный`);
+        }
+      }
+    } else {
+      console.log(`   ⚠️  GraphRAG не активен, пропускаю проверку студента`);
+    }
+
+    // ШАГ 3: Загрузка деталей задания
+    console.log('\n' + '='.repeat(70));
+    console.log('📋 ШАГ 3: ДЕТАЛИ ЗАДАНИЯ');
     console.log('='.repeat(70));
     
     await enrichSubmissionWithTaskDetails(submission, page);
@@ -218,9 +292,9 @@ async function main() {
       console.log(`\n⚠️  Идеальный ответ не найден`);
     }
 
-    // ШАГ 3: SEMANTIC SEARCH
+    // ШАГ 4: SEMANTIC SEARCH
     console.log('\n' + '='.repeat(70));
-    console.log('🔍 ШАГ 3: SEMANTIC SEARCH');
+    console.log('🔍 ШАГ 4: SEMANTIC SEARCH');
     console.log('='.repeat(70));
     
     let graphRAGContext = '';
@@ -282,9 +356,9 @@ async function main() {
       console.log(`\n⚠️  GraphRAG не активен или урок не найден`);
     }
 
-    // ШАГ 4: Проверка AI
+    // ШАГ 5: Проверка AI
     console.log('\n' + '='.repeat(70));
-    console.log('🤖 ШАГ 4: ПРОВЕРКА AI');
+    console.log('🤖 ШАГ 5: ПРОВЕРКА AI');
     console.log('='.repeat(70));
     
     console.log(`\n🧠 Отправка запроса к AI...`);
@@ -301,15 +375,16 @@ async function main() {
     console.log(`   ${feedback.comment.slice(0, 300)}...`);
     console.log(`   📏 Полная длина комментария: ${feedback.comment.length} символов`);
 
-    // ШАГ 5: Сохранение в GraphRAG
+    // ШАГ 6: Сохранение работы в GraphRAG
     if (graphRAG && submission.lessonId) {
       console.log('\n' + '='.repeat(70));
-      console.log('💾 ШАГ 5: СОХРАНЕНИЕ В GRAPHRAG');
+      console.log('💾 ШАГ 6: СОХРАНЕНИЕ РАБОТЫ В GRAPHRAG');
       console.log('='.repeat(70));
       
       const studentId = `student_${Buffer.from(submission.studentName).toString('base64').slice(0, 16)}`;
       
       // Связываем работу со студентом
+      // (Студент уже проверен и обновлен в ШАГ 2)
       await graphRAG.linkSubmissionToStudent(
         submission.id,
         studentId,
