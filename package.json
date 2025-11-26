@@ -13,7 +13,8 @@
     "search": "ts-node src/search-knowledge.ts",
     "clear-kb": "ts-node src/clear-lessons.ts",
     "inspect-kb": "ts-node src/inspect-sections.ts",
-    "visualize-graph": "ts-node src/visualize-graph.ts"
+    "visualize-graph": "ts-node src/visualize-graph.ts",
+    "research": "ts-node src/research-course-structure.ts"
   },
   "keywords": [],
   "author": "",
