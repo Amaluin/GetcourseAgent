@@ -299,3 +299,4 @@ console.log(`⏱️ Embedding создан за ${time}ms`);
 
 
 
+

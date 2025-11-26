@@ -24,8 +24,10 @@ export async function getUncheckedSubmissions(page: Page): Promise<HomeworkSubmi
       // ID задания
       const id = await wrapper.getAttribute('data-id') || '';
       
-      // Имя студента
+      // Имя студента и ссылка на профиль
       const studentName = await wrapper.locator('.user-profile-link .text').first().innerText().catch(() => 'Неизвестный студент');
+      const studentProfileLink = await wrapper.locator('.user-profile-link').first().getAttribute('href').catch(() => null);
+      const studentUrl = studentProfileLink ? (studentProfileLink.startsWith('http') ? studentProfileLink : `${config.gcUrl}${studentProfileLink}`) : undefined;
       
       // Текст ответа
       const text = await wrapper.locator('.answer-text').innerText().catch(() => '');
@@ -61,6 +63,7 @@ export async function getUncheckedSubmissions(page: Page): Promise<HomeworkSubmi
         submissions.push({
           id,
           studentName,
+          studentUrl: studentUrl, // Ссылка на профиль студента
           text: fullText, // Сохраняем полный текст с комментариями
           imageUrls,
           fileUrls: otherFiles,

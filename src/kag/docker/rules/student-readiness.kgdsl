@@ -1,0 +1,122 @@
+// Правило проверки готовности студента к изучению концепции
+// Rule: StudentReadiness
+// Priority: 10 (High)
+// Confidence: 0.85
+
+RULE StudentReadiness {
+  DESCRIPTION "Check if student is ready to learn a concept based on prerequisite mastery"
+  
+  // Условие 1: Студент освоил все предварительные концепции
+  WHEN (
+    student:Student
+    AND concept:Concept
+    AND concept -[REQUIRES]-> prerequisite:Concept
+    AND student -[SUBMITS]-> submission:Submission
+    AND submission -[EVALUATES {mastery_level >= 0.7}]-> prerequisite
+    AND submission.status = 'accepted'
+  )
+  
+  // Условие 2: Уровень студента соответствует сложности концепции
+  AND (
+    (student.level = 'beginner' AND concept.difficulty = 'beginner')
+    OR (student.level = 'intermediate' AND concept.difficulty IN ['beginner', 'intermediate'])
+    OR (student.level = 'advanced')
+  )
+  
+  // Условие 3: Студент еще не освоил эту концепцию
+  AND NOT EXISTS (
+    student -[SUBMITS]-> past_submission:Submission
+    AND past_submission -[EVALUATES {mastery_level >= 0.8}]-> concept
+    AND past_submission.status = 'accepted'
+  )
+  
+  // Вывод: Студент готов изучать концепцию
+  INFER (
+    student -[READY_TO_LEARN {
+      confidence: 0.85,
+      reason: "Student has mastered prerequisites and meets level requirements",
+      recommended_at: datetime()
+    }]-> concept
+  )
+  
+  // Уровень уверенности
+  CONFIDENCE 0.85
+  
+  // Приоритет выполнения правила
+  PRIORITY 10
+}
+
+// Дополнительное правило для концепций без предварительных условий
+RULE StudentReadinessBasic {
+  DESCRIPTION "Check if student is ready for concepts without prerequisites"
+  
+  // Условие: Концепция не имеет предварительных условий
+  WHEN (
+    student:Student
+    AND concept:Concept
+    AND NOT EXISTS (concept -[REQUIRES]-> :Concept)
+  )
+  
+  // Условие: Уровень студента соответствует сложности
+  AND (
+    (student.level = 'beginner' AND concept.difficulty = 'beginner')
+    OR (student.level = 'intermediate' AND concept.difficulty IN ['beginner', 'intermediate'])
+    OR (student.level = 'advanced')
+  )
+  
+  // Условие: Студент еще не освоил эту концепцию
+  AND NOT EXISTS (
+    student -[SUBMITS]-> submission:Submission
+    AND submission -[EVALUATES {mastery_level >= 0.8}]-> concept
+    AND submission.status = 'accepted'
+  )
+  
+  // Вывод: Студент готов изучать базовую концепцию
+  INFER (
+    student -[READY_TO_LEARN {
+      confidence: 0.9,
+      reason: "Basic concept with no prerequisites, student level matches",
+      recommended_at: datetime()
+    }]-> concept
+  )
+  
+  CONFIDENCE 0.9
+  PRIORITY 15
+}
+
+// Правило для определения следующего шага в обучении
+RULE NextLearningStep {
+  DESCRIPTION "Recommend the next concept to learn based on learning path"
+  
+  // Условие: Студент готов изучать концепцию
+  WHEN (
+    student:Student -[READY_TO_LEARN]-> concept:Concept
+    AND lesson:Lesson -[TEACHES]-> concept
+  )
+  
+  // Условие: Урок доступен (не слишком сложный)
+  AND (
+    (student.level = 'beginner' AND lesson.difficulty = 'beginner')
+    OR (student.level = 'intermediate' AND lesson.difficulty IN ['beginner', 'intermediate'])
+    OR (student.level = 'advanced')
+  )
+  
+  // Условие: Студент еще не изучал этот урок
+  AND NOT EXISTS (
+    student -[STUDIES {completed_at: NOT NULL}]-> lesson
+  )
+  
+  // Вывод: Рекомендовать урок студенту
+  INFER (
+    student -[SHOULD_STUDY {
+      confidence: 0.8,
+      reason: "Next logical step in learning path",
+      recommended_at: datetime(),
+      priority: concept.difficulty
+    }]-> lesson
+  )
+  
+  CONFIDENCE 0.8
+  PRIORITY 12
+}
+

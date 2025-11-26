@@ -339,3 +339,4 @@ console.log(result); // ✅ Работает!
 
 
 
+

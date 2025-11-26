@@ -3,6 +3,7 @@ import { LessonContent } from './lesson-parser';
 export interface HomeworkSubmission {
   id: string;
   studentName: string;
+  studentUrl?: string; // Ссылка на профиль студента в GetCourse
   text: string;
   imageUrls: string[];
   fileUrls: string[];

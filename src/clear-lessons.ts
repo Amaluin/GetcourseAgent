@@ -50,3 +50,4 @@ async function clearLessons() {
 clearLessons().catch(console.error);
 
 
+

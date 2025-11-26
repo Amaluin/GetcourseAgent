@@ -1,0 +1,126 @@
+version: '3.8'
+
+services:
+  # OpenSPG Server
+  openspg-server:
+    image: openspg/openspg-server:latest
+    container_name: openspg-education
+    ports:
+      - "8887:8887"
+      - "8888:8888"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - OPENSPG_STORAGE_TYPE=mysql
+      - OPENSPG_MYSQL_HOST=mysql
+      - OPENSPG_MYSQL_PORT=3306
+      - OPENSPG_MYSQL_DATABASE=openspg_education
+      - OPENSPG_MYSQL_USERNAME=openspg
+      - OPENSPG_MYSQL_PASSWORD=openspg@123
+      - OPENSPG_NEO4J_HOST=neo4j
+      - OPENSPG_NEO4J_PORT=7687
+      - OPENSPG_NEO4J_USERNAME=neo4j
+      - OPENSPG_NEO4J_PASSWORD=neo4j@openspg
+      - OPENSPG_MINIO_HOST=minio
+      - OPENSPG_MINIO_PORT=9000
+      - OPENSPG_MINIO_ACCESS_KEY=minioadmin
+      - OPENSPG_MINIO_SECRET_KEY=minioadmin
+      - OPENSPG_MINIO_BUCKET=openspg-education
+    volumes:
+      - ./schema:/app/schema
+      - ./rules:/app/rules
+    depends_on:
+      - mysql
+      - neo4j
+      - minio
+    networks:
+      - openspg-network
+    restart: unless-stopped
+
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: mysql-education
+    ports:
+      - "3307:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=root@123
+      - MYSQL_DATABASE=openspg_education
+      - MYSQL_USER=openspg
+      - MYSQL_PASSWORD=openspg@123
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init/mysql:/docker-entrypoint-initdb.d
+    networks:
+      - openspg-network
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password
+
+  # Neo4j Graph Database
+  neo4j:
+    image: neo4j:5.12-community
+    container_name: neo4j-education
+    ports:
+      - "7475:7474"
+      - "7688:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/neo4j@openspg
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=2G
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_plugins:/plugins
+      - ./init/neo4j:/docker-entrypoint-initdb.d
+    networks:
+      - openspg-network
+    restart: unless-stopped
+
+  # MinIO Object Storage
+  minio:
+    image: minio/minio:latest
+    container_name: minio-education
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    volumes:
+      - minio_data:/data
+    networks:
+      - openspg-network
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+
+  # MinIO Client for bucket creation
+  minio-setup:
+    image: minio/mc:latest
+    container_name: minio-setup-education
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      sleep 10;
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb myminio/openspg-education --ignore-existing;
+      /usr/bin/mc anonymous set public myminio/openspg-education;
+      exit 0;
+      "
+    networks:
+      - openspg-network
+
+volumes:
+  mysql_data:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_import:
+  neo4j_plugins:
+  minio_data:
+
+networks:
+  openspg-network:
+    driver: bridge
+

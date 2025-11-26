@@ -1,0 +1,176 @@
+// Правило соответствия сложности задания уровню студента
+// Rule: AssignmentDifficulty
+// Priority: 20 (Medium)
+// Confidence: 0.9
+
+RULE AssignmentDifficulty {
+  DESCRIPTION "Match assignment difficulty with student level and performance"
+  
+  // Условие 1: Студент и задание
+  WHEN (
+    student:Student
+    AND assignment:Assignment
+    AND lesson:Lesson -[CONTAINS]-> assignment
+  )
+  
+  // Условие 2: Проверка соответствия уровня
+  AND (
+    (student.level = 'beginner' AND lesson.difficulty = 'beginner')
+    OR (student.level = 'intermediate' AND lesson.difficulty IN ['beginner', 'intermediate'])
+    OR (student.level = 'advanced')
+  )
+  
+  // Условие 3: Студент изучил урок
+  AND (
+    student -[STUDIES {progress >= 0.8}]-> lesson
+  )
+  
+  // Условие 4: Студент еще не выполнил задание или может повторить
+  AND (
+    NOT EXISTS (student -[SUBMITS]-> :Submission -[:FOR_ASSIGNMENT]-> assignment)
+    OR EXISTS (
+      student -[SUBMITS]-> prev_submission:Submission -[:FOR_ASSIGNMENT]-> assignment
+      AND prev_submission.status = 'rejected'
+      AND prev_submission.attempts < assignment.max_attempts
+    )
+  )
+  
+  // Вывод: Задание подходит студенту
+  INFER (
+    student -[SUITABLE_FOR {
+      confidence: 0.9,
+      reason: "Student level matches assignment difficulty and has completed lesson",
+      recommended_at: datetime()
+    }]-> assignment
+  )
+  
+  CONFIDENCE 0.9
+  PRIORITY 20
+}
+
+// Правило для адаптивной сложности
+RULE AdaptiveDifficulty {
+  DESCRIPTION "Adjust recommended difficulty based on student performance"
+  
+  // Условие: Анализ последних работ студента
+  WHEN (
+    student:Student
+    AND assignment:Assignment
+    AND lesson:Lesson -[CONTAINS]-> assignment
+  )
+  
+  // Подсчет успешных работ студента
+  WITH student, assignment, lesson,
+       COUNT {
+         MATCH (student) -[SUBMITS]-> (s:Submission)
+         WHERE s.status = 'accepted' AND s.submitted_at > datetime() - duration('P30D')
+         RETURN s
+       } AS recent_successes,
+       COUNT {
+         MATCH (student) -[SUBMITS]-> (s:Submission)
+         WHERE s.submitted_at > datetime() - duration('P30D')
+         RETURN s
+       } AS recent_total
+  
+  // Условие: Высокий процент успеха (>80%)
+  WHERE recent_total > 0 AND (recent_successes * 1.0 / recent_total) > 0.8
+  
+  // Условие: Текущий уровень студента ниже сложности урока
+  AND (
+    (student.level = 'beginner' AND lesson.difficulty = 'intermediate')
+    OR (student.level = 'intermediate' AND lesson.difficulty = 'advanced')
+  )
+  
+  // Вывод: Рекомендовать более сложное задание
+  INFER (
+    student -[READY_FOR_CHALLENGE {
+      confidence: 0.75,
+      reason: "Student shows high success rate, ready for harder assignments",
+      success_rate: recent_successes * 1.0 / recent_total,
+      recommended_at: datetime()
+    }]-> assignment
+  )
+  
+  CONFIDENCE 0.75
+  PRIORITY 18
+}
+
+// Правило для определения необходимости повторения
+RULE NeedsReview {
+  DESCRIPTION "Identify when student needs to review concepts before attempting assignment"
+  
+  // Условие: Студент и задание
+  WHEN (
+    student:Student
+    AND assignment:Assignment
+    AND lesson:Lesson -[CONTAINS]-> assignment
+    AND lesson -[TEACHES]-> concept:Concept
+  )
+  
+  // Условие: Студент имеет низкий уровень освоения концепций
+  AND EXISTS (
+    student -[SUBMITS]-> submission:Submission
+    AND submission -[EVALUATES {mastery_level < 0.5}]-> concept
+  )
+  
+  // Условие: Последняя попытка была недавно
+  AND EXISTS (
+    student -[SUBMITS]-> recent_submission:Submission
+    WHERE recent_submission.submitted_at > datetime() - duration('P7D')
+    AND recent_submission.status = 'rejected'
+  )
+  
+  // Вывод: Рекомендовать повторение материала
+  INFER (
+    student -[NEEDS_REVIEW {
+      confidence: 0.85,
+      reason: "Low concept mastery detected, review recommended before attempting assignment",
+      recommended_at: datetime(),
+      review_concepts: [concept.name]
+    }]-> lesson
+  )
+  
+  CONFIDENCE 0.85
+  PRIORITY 25
+}
+
+// Правило для оптимального времени выполнения
+RULE OptimalTiming {
+  DESCRIPTION "Recommend optimal time to attempt assignment based on student patterns"
+  
+  // Условие: Студент и задание
+  WHEN (
+    student:Student -[SUITABLE_FOR]-> assignment:Assignment
+  )
+  
+  // Анализ паттернов успешных работ
+  WITH student, assignment,
+       AVG {
+         MATCH (student) -[SUBMITS]-> (s:Submission)
+         WHERE s.status = 'accepted'
+         RETURN EXTRACT(HOUR FROM s.submitted_at)
+       } AS avg_success_hour,
+       AVG {
+         MATCH (student) -[SUBMITS]-> (s:Submission)
+         WHERE s.status = 'accepted'
+         RETURN EXTRACT(DAYOFWEEK FROM s.submitted_at)
+       } AS avg_success_day
+  
+  // Условие: Есть достаточно данных для анализа
+  WHERE avg_success_hour IS NOT NULL
+  
+  // Вывод: Рекомендовать оптимальное время
+  INFER (
+    student -[OPTIMAL_TIME {
+      confidence: 0.7,
+      reason: "Based on student's successful submission patterns",
+      recommended_hour: avg_success_hour,
+      recommended_day: avg_success_day,
+      recommended_at: datetime()
+    }]-> assignment
+  )
+  
+  CONFIDENCE 0.7
+  PRIORITY 15
+}
+

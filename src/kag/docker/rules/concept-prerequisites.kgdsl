@@ -1,0 +1,250 @@
+// Правило проверки предварительных условий для концепций
+// Rule: ConceptPrerequisites
+// Priority: 30 (Low - foundational)
+// Confidence: 0.8
+
+RULE ConceptPrerequisites {
+  DESCRIPTION "Validate that student has mastered prerequisite concepts"
+  
+  // Условие 1: Концепция и ее предварительные условия
+  WHEN (
+    concept:Concept -[REQUIRES {strength >= 0.7}]-> prerequisite:Concept
+    AND student:Student
+  )
+  
+  // Условие 2: Студент изучил урок с предварительной концепцией
+  AND EXISTS (
+    lesson:Lesson -[TEACHES]-> prerequisite
+    AND student -[STUDIES {progress >= 0.8, completed_at: NOT NULL}]-> lesson
+  )
+  
+  // Условие 3: Студент продемонстрировал освоение предварительной концепции
+  AND EXISTS (
+    student -[SUBMITS]-> submission:Submission
+    AND submission -[EVALUATES {mastery_level >= 0.7}]-> prerequisite
+    AND submission.status = 'accepted'
+  )
+  
+  // Вывод: Студент готов изучать концепцию
+  INFER (
+    student -[READY_TO_LEARN {
+      confidence: 0.8,
+      reason: "All prerequisites mastered",
+      prerequisite_met: prerequisite.name,
+      recommended_at: datetime()
+    }]-> concept
+  )
+  
+  CONFIDENCE 0.8
+  PRIORITY 30
+}
+
+// Правило для построения пути обучения
+RULE LearningPath {
+  DESCRIPTION "Build optimal learning path based on concept dependencies"
+  
+  // Условие: Целевая концепция и ее зависимости
+  WHEN (
+    target_concept:Concept
+    AND student:Student
+    AND target_concept -[REQUIRES*1..3]-> intermediate_concept:Concept
+  )
+  
+  // Условие: Студент еще не освоил промежуточную концепцию
+  AND NOT EXISTS (
+    student -[SUBMITS]-> submission:Submission
+    AND submission -[EVALUATES {mastery_level >= 0.7}]-> intermediate_concept
+    AND submission.status = 'accepted'
+  )
+  
+  // Условие: Промежуточная концепция доступна для изучения
+  AND (
+    NOT EXISTS (intermediate_concept -[REQUIRES]-> :Concept)
+    OR EXISTS (
+      intermediate_concept -[REQUIRES]-> prereq:Concept
+      AND student -[SUBMITS]-> s:Submission
+      AND s -[EVALUATES {mastery_level >= 0.7}]-> prereq
+    )
+  )
+  
+  // Вывод: Добавить в путь обучения
+  INFER (
+    student -[NEXT_IN_PATH {
+      confidence: 0.75,
+      reason: "Required step towards target concept",
+      target: target_concept.name,
+      step_order: LENGTH(shortestPath((intermediate_concept)-[REQUIRES*]->(target_concept))),
+      recommended_at: datetime()
+    }]-> intermediate_concept
+  )
+  
+  CONFIDENCE 0.75
+  PRIORITY 28
+}
+
+// Правило для выявления пробелов в знаниях
+RULE KnowledgeGap {
+  DESCRIPTION "Identify knowledge gaps when student struggles with concept"
+  
+  // Условие: Студент не справился с концепцией
+  WHEN (
+    student:Student -[SUBMITS]-> submission:Submission
+    AND submission -[EVALUATES {mastery_level < 0.5}]-> concept:Concept
+    AND submission.status = 'rejected'
+    AND concept -[REQUIRES]-> prerequisite:Concept
+  )
+  
+  // Условие: Проверка освоения предварительной концепции
+  WITH student, concept, prerequisite,
+       COALESCE(
+         MAX {
+           MATCH (student) -[SUBMITS]-> (s:Submission) -[EVALUATES]-> (prerequisite)
+           WHERE s.status = 'accepted'
+           RETURN s.mastery_level
+         },
+         0.0
+       ) AS prereq_mastery
+  
+  // Условие: Низкий уровень освоения предварительной концепции
+  WHERE prereq_mastery < 0.7
+  
+  // Вывод: Выявлен пробел в знаниях
+  INFER (
+    student -[HAS_KNOWLEDGE_GAP {
+      confidence: 0.85,
+      reason: "Failed concept due to weak prerequisite knowledge",
+      gap_concept: prerequisite.name,
+      current_mastery: prereq_mastery,
+      target_mastery: 0.7,
+      recommended_at: datetime()
+    }]-> prerequisite
+  )
+  
+  CONFIDENCE 0.85
+  PRIORITY 35
+}
+
+// Правило для рекомендации дополнительных ресурсов
+RULE AdditionalResources {
+  DESCRIPTION "Recommend additional resources for concepts with low mastery"
+  
+  // Условие: Студент имеет низкий уровень освоения концепции
+  WHEN (
+    student:Student -[SUBMITS]-> submission:Submission
+    AND submission -[EVALUATES {mastery_level < 0.6}]-> concept:Concept
+    AND lesson:Lesson -[TEACHES]-> concept
+    AND lesson -[USES {purpose IN ['optional', 'reference']}]-> resource:Resource
+  )
+  
+  // Условие: Студент еще не использовал этот ресурс
+  AND NOT EXISTS (
+    student -[ACCESSED]-> resource
+  )
+  
+  // Вывод: Рекомендовать дополнительный ресурс
+  INFER (
+    student -[SHOULD_ACCESS {
+      confidence: 0.7,
+      reason: "Additional resource to improve concept mastery",
+      concept: concept.name,
+      current_mastery: submission.mastery_level,
+      recommended_at: datetime()
+    }]-> resource
+  )
+  
+  CONFIDENCE 0.7
+  PRIORITY 22
+}
+
+// Правило для определения готовности к продвинутым темам
+RULE AdvancedReadiness {
+  DESCRIPTION "Determine if student is ready for advanced concepts"
+  
+  // Условие: Студент освоил базовые концепции
+  WHEN (
+    student:Student
+    AND advanced_concept:Concept {difficulty: 'advanced'}
+    AND advanced_concept -[REQUIRES*]-> basic_concept:Concept {difficulty: 'beginner'}
+  )
+  
+  // Подсчет освоенных базовых концепций
+  WITH student, advanced_concept,
+       COUNT {
+         MATCH (advanced_concept) -[REQUIRES*]-> (bc:Concept {difficulty: 'beginner'})
+         RETURN bc
+       } AS total_basic,
+       COUNT {
+         MATCH (student) -[SUBMITS]-> (s:Submission) -[EVALUATES {mastery_level >= 0.8}]-> (bc:Concept {difficulty: 'beginner'})
+         WHERE (advanced_concept) -[REQUIRES*]-> (bc)
+         AND s.status = 'accepted'
+         RETURN bc
+       } AS mastered_basic
+  
+  // Условие: Освоено более 80% базовых концепций
+  WHERE total_basic > 0 AND (mastered_basic * 1.0 / total_basic) >= 0.8
+  
+  // Условие: Уровень студента позволяет
+  AND student.level IN ['intermediate', 'advanced']
+  
+  // Вывод: Студент готов к продвинутым темам
+  INFER (
+    student -[READY_FOR_ADVANCED {
+      confidence: 0.85,
+      reason: "Strong foundation in basic concepts",
+      basic_mastery_rate: mastered_basic * 1.0 / total_basic,
+      recommended_at: datetime()
+    }]-> advanced_concept
+  )
+  
+  CONFIDENCE 0.85
+  PRIORITY 20
+}
+
+// Правило для коллаборативного обучения
+RULE CollaborativeLearning {
+  DESCRIPTION "Recommend peer learning opportunities based on complementary knowledge"
+  
+  // Условие: Два студента с разными сильными сторонами
+  WHEN (
+    student1:Student
+    AND student2:Student
+    WHERE student1.id <> student2.id
+    AND concept1:Concept
+    AND concept2:Concept
+    WHERE concept1.id <> concept2.id
+  )
+  
+  // Условие: Первый студент силен в concept1, слаб в concept2
+  AND EXISTS (
+    student1 -[SUBMITS]-> s1:Submission -[EVALUATES {mastery_level >= 0.8}]-> concept1
+    AND s1.status = 'accepted'
+  )
+  AND EXISTS (
+    student1 -[SUBMITS]-> s2:Submission -[EVALUATES {mastery_level < 0.6}]-> concept2
+  )
+  
+  // Условие: Второй студент силен в concept2, слаб в concept1
+  AND EXISTS (
+    student2 -[SUBMITS]-> s3:Submission -[EVALUATES {mastery_level >= 0.8}]-> concept2
+    AND s3.status = 'accepted'
+  )
+  AND EXISTS (
+    student2 -[SUBMITS]-> s4:Submission -[EVALUATES {mastery_level < 0.6}]-> concept1
+  )
+  
+  // Вывод: Рекомендовать совместное обучение
+  INFER (
+    student1 -[SHOULD_COLLABORATE_WITH {
+      confidence: 0.65,
+      reason: "Complementary knowledge for mutual benefit",
+      peer: student2.name,
+      teach_concept: concept1.name,
+      learn_concept: concept2.name,
+      recommended_at: datetime()
+    }]-> student2
+  )
+  
+  CONFIDENCE 0.65
+  PRIORITY 15
+}
+

@@ -159,3 +159,4 @@ MATCH (n)-[r]->(m) RETURN n, r, m LIMIT 100
 **Приятного использования GraphRAG!** 🚀
 
 
+

@@ -499,32 +499,50 @@ function createDetailedSections(
  * Извлекает содержимое урока: текстовые описания к видео, файлы, изображения
  */
 export async function getLessonContent(page: Page, lessonId: string): Promise<LessonContent> {
-  console.log(`📚 Загружаю содержимое урока ID: ${lessonId}...`);
+  console.log(`\n📚 Загружаю содержимое урока ID: ${lessonId}...`);
+  console.log(`   ⏱️  Начало: ${new Date().toLocaleTimeString()}`);
   
   // Переход к уроку
   const lessonUrl = `https://university.zerocoder.ru/teach/control/lesson/view/id/${lessonId}`;
-  console.log(`   🔗 Перехожу к: ${lessonUrl}`);
+  console.log(`\n   🔗 ШАГ 1: Переход к уроку`);
+  console.log(`      URL: ${lessonUrl}`);
+  console.log(`      ⏳ Ожидание загрузки страницы...`);
   
+  const startTime = Date.now();
   await page.goto(lessonUrl, { waitUntil: 'domcontentloaded' });
+  const loadTime = Date.now() - startTime;
+  console.log(`      ✅ Страница загружена за ${loadTime}ms`);
+  
+  console.log(`   ⏳ Дополнительное ожидание (2 секунды)...`);
   await page.waitForTimeout(2000);
+  console.log(`      ✅ Ожидание завершено`);
   
   // Проверяем, куда мы попали
+  console.log(`\n   🔍 ШАГ 2: Проверка URL`);
   const currentUrl = page.url();
-  console.log(`   ✅ Текущий URL: ${currentUrl}`);
+  console.log(`      Текущий URL: ${currentUrl}`);
   
   // GetCourse может делать редирект и менять формат URL:
   // /teach/control/lesson/view/id/345069174 → /pl/teach/control/lesson/view?id=345069174
   if (!currentUrl.includes(`/lesson/view`) || !currentUrl.includes(lessonId)) {
-    console.warn(`   ⚠️ ВНИМАНИЕ: Мы НЕ на странице урока! Возможно, редирект или ошибка.`);
+    console.warn(`      ⚠️ ВНИМАНИЕ: Мы НЕ на странице урока! Возможно, редирект или ошибка.`);
+  } else {
+    console.log(`      ✅ URL корректный, мы на странице урока`);
   }
   
   // ЗАКРЫВАЕМ РЕКЛАМУ И МОДАЛЬНЫЕ ОКНА
-  console.log(`   🚫 Закрываю рекламу и модальные окна...`);
+  console.log(`\n   🚫 ШАГ 3: Закрытие рекламы и модальных окон`);
+  console.log(`      ⏳ Обрабатываю всплывающие окна...`);
+  const adsStartTime = Date.now();
   await closeAdsAndModals(page);
+  const adsTime = Date.now() - adsStartTime;
+  console.log(`      ✅ Обработка завершена за ${adsTime}ms`);
   
   // Скриншоты отключены для экономии времени
   
   // Извлекаем заголовок урока (пробуем разные селекторы)
+  console.log(`\n   📖 ШАГ 4: Извлечение заголовка урока`);
+  console.log(`      ⏳ Ищу заголовок...`);
   let title = 'Без названия';
   const titleSelectors = [
     'h2.lesson-title-value', // Основной селектор для GetCourse
@@ -544,6 +562,7 @@ export async function getLessonContent(page: Page, lessonId: string): Promise<Le
       const text = await element.innerText({ timeout: 1000 });
       if (text && text.trim()) {
         title = text.trim();
+        console.log(`      ✅ Заголовок найден через селектор: ${selector}`);
         break;
       }
     } catch (e) {
@@ -555,16 +574,18 @@ export async function getLessonContent(page: Page, lessonId: string): Promise<Le
   if (title === 'Без названия') {
     try {
       title = await page.title();
+      console.log(`      ✅ Заголовок взят из <title>`);
     } catch (e) {
-      // Оставляем "Без названия"
+      console.log(`      ⚠️  Заголовок не найден, используется "Без названия"`);
     }
   }
   
-  console.log(`   📖 Урок: "${title}"`);
-  console.log(`   🔗 URL: ${lessonUrl}`);
+  console.log(`      📄 Название урока: "${title}"`);
   
   // Измеряем объем текста ДО раскрытия через JavaScript (селекторы виснут!)
-  console.log(`   🔍 Получаю текст страницы через JavaScript...`);
+  console.log(`\n   🔍 ШАГ 5: Получение текста ДО раскрытия блоков`);
+  console.log(`      ⏳ Извлекаю текст через JavaScript...`);
+  const textBeforeStartTime = Date.now();
   
   const textBefore = await page.evaluate(() => {
     // Ищем контент через JavaScript
@@ -592,15 +613,25 @@ export async function getLessonContent(page: Page, lessonId: string): Promise<Le
     return document.body.textContent || '';
   });
   
-  console.log(`   📄 Объем текста ДО раскрытия: ${textBefore.length} символов`);
+  const textBeforeTime = Date.now() - textBeforeStartTime;
+  console.log(`      ✅ Текст извлечен за ${textBeforeTime}ms`);
+  console.log(`      📄 Объем текста ДО раскрытия: ${textBefore.length} символов`);
   
   // РАСКРЫВАЕМ ВСЕ СКРЫТЫЕ БЛОКИ (спойлеры, аккордеоны)
-  console.log(`   🔓 Раскрываю скрытые блоки...`);
+  console.log(`\n   🔓 ШАГ 6: Раскрытие скрытых блоков`);
+  console.log(`      ⏳ Ищу и раскрываю спойлеры, аккордеоны...`);
+  const expandStartTime = Date.now();
   await expandAllHiddenBlocks(page);
+  const expandTime = Date.now() - expandStartTime;
+  console.log(`      ✅ Раскрытие завершено за ${expandTime}ms`);
   
   // Скриншоты отключены
   
   // Измеряем объем текста ПОСЛЕ раскрытия через JavaScript
+  console.log(`\n   📝 ШАГ 7: Получение текста ПОСЛЕ раскрытия блоков`);
+  console.log(`      ⏳ Извлекаю полный текст урока...`);
+  const fullTextStartTime = Date.now();
+  
   const fullText = await page.evaluate(() => {
     // Приоритетные селекторы для контента урока
     const contentSelectors = [
@@ -707,14 +738,21 @@ export async function getLessonContent(page: Page, lessonId: string): Promise<Le
       .trim();
   });
   
+  const fullTextTime = Date.now() - fullTextStartTime;
   const textIncrease = fullText.length - textBefore.length;
-  console.log(`   📄 Объем текста ПОСЛЕ раскрытия: ${fullText.length} символов (+${textIncrease})`);
+  console.log(`      ✅ Текст извлечен за ${fullTextTime}ms`);
+  console.log(`      📄 Объем текста ПОСЛЕ раскрытия: ${fullText.length} символов (+${textIncrease})`);
   
   // Сохранение HTML отключено
   
   // Ищем все видео на странице
+  console.log(`\n   🎥 ШАГ 8: Поиск видео на странице`);
+  console.log(`      ⏳ Ищу iframe и video элементы...`);
+  const videoStartTime = Date.now();
   const videoIframes = await page.locator('iframe[src*="youtube"], iframe[src*="vimeo"], iframe[src*="rutube"], video').all();
-  console.log(`   🎥 Найдено видео: ${videoIframes.length}`);
+  const videoTime = Date.now() - videoStartTime;
+  console.log(`      ✅ Поиск завершен за ${videoTime}ms`);
+  console.log(`      🎬 Найдено видео: ${videoIframes.length}`);
   
   const videoSections: VideoSection[] = [];
   
@@ -762,17 +800,26 @@ export async function getLessonContent(page: Page, lessonId: string): Promise<Le
   }
   
   // Ищем изображения (примеры из урока)
+  console.log(`\n   🖼️ ШАГ 9: Поиск изображений и файлов`);
+  console.log(`      ⏳ Ищу изображения...`);
+  const imagesStartTime = Date.now();
   const imageUrls = await page.locator('.lesson-content img[src], .training-content img[src]').evaluateAll(imgs => 
     imgs.map(img => img.getAttribute('src') || '').filter(src => src && !src.includes('default') && !src.includes('profile'))
   ) as string[];
+  const imagesTime = Date.now() - imagesStartTime;
+  console.log(`      ✅ Изображения найдены за ${imagesTime}ms`);
   
-  // Ищем прикрепленные файлы
+  console.log(`      ⏳ Ищу прикрепленные файлы...`);
+  const filesStartTime = Date.now();
   const fileUrls = await page.locator('.lesson-content a[href*="fileservice"], .training-content a[href*="fileservice"]').evaluateAll(links => 
     links.map(link => link.getAttribute('href') || '')
   ) as string[];
+  const filesTime = Date.now() - filesStartTime;
+  console.log(`      ✅ Файлы найдены за ${filesTime}ms`);
   
-  console.log(`   🖼️ Изображений в уроке: ${imageUrls.length}`);
-  console.log(`   📎 Прикрепленных файлов: ${fileUrls.length}`);
+  console.log(`      📊 Результаты:`);
+  console.log(`         🖼️ Изображений в уроке: ${imageUrls.length}`);
+  console.log(`         📎 Прикрепленных файлов: ${fileUrls.length}`);
   
   // Итоговая статистика
   console.log(`\n   📊 ИТОГО извлечено из урока:`);
@@ -783,10 +830,19 @@ export async function getLessonContent(page: Page, lessonId: string): Promise<Le
   console.log(`      • Файлов: ${fileUrls.length}`);
   
   // Создаем выжимку через AI
+  console.log(`\n   🧠 ШАГ 10: Создание выжимки урока через AI`);
+  console.log(`      ⏳ Отправляю запрос к AI...`);
+  const summaryStartTime = Date.now();
   const summary = await summarizeLessonContent(videoSections, title);
+  const summaryTime = Date.now() - summaryStartTime;
+  console.log(`      ✅ Выжимка создана за ${summaryTime}ms`);
+  console.log(`      📝 Размер выжимки: ${summary.length} символов`);
+  console.log(`      📄 Первые 150 символов: "${summary.substring(0, 150)}..."`);
   
-  console.log(`   ✅ Выжимка урока создана (${summary.length} символов)`);
-  console.log(`   📝 Первые 150 символов: "${summary.substring(0, 150)}..."\n`);
+  const totalTime = Date.now() - startTime;
+  console.log(`\n   ✅ ПАРСИНГ УРОКА ЗАВЕРШЕН`);
+  console.log(`      ⏱️  Общее время: ${totalTime}ms (${(totalTime / 1000).toFixed(1)} сек)`);
+  console.log(`      ⏱️  Завершение: ${new Date().toLocaleTimeString()}\n`);
   
   // Создаем детальные секции для базы знаний
   const detailedSections = createDetailedSections(videoSections, fullText);

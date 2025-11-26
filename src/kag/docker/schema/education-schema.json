@@ -1,0 +1,580 @@
+{
+  "name": "education-schema",
+  "version": "1.0.0",
+  "description": "Education domain schema for GetcourseAgent KAG system",
+  "namespace": "com.getcourseagent.education",
+  "entities": [
+    {
+      "name": "Lesson",
+      "description": "Educational lesson containing learning materials",
+      "properties": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Unique identifier for the lesson"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "description": "Title of the lesson"
+        },
+        {
+          "name": "content",
+          "type": "text",
+          "required": true,
+          "description": "Full content of the lesson"
+        },
+        {
+          "name": "summary",
+          "type": "text",
+          "required": false,
+          "description": "Brief summary of the lesson"
+        },
+        {
+          "name": "duration",
+          "type": "integer",
+          "required": false,
+          "description": "Duration in minutes"
+        },
+        {
+          "name": "difficulty",
+          "type": "enum",
+          "values": ["beginner", "intermediate", "advanced"],
+          "required": false,
+          "description": "Difficulty level of the lesson"
+        },
+        {
+          "name": "created_at",
+          "type": "datetime",
+          "required": true,
+          "description": "Creation timestamp"
+        },
+        {
+          "name": "updated_at",
+          "type": "datetime",
+          "required": true,
+          "description": "Last update timestamp"
+        },
+        {
+          "name": "videoUrls",
+          "type": "array",
+          "items": {"type": "string"},
+          "required": false,
+          "description": "URLs of video resources"
+        },
+        {
+          "name": "imageUrls",
+          "type": "array",
+          "items": {"type": "string"},
+          "required": false,
+          "description": "URLs of image resources"
+        }
+      ],
+      "indexes": [
+        {"type": "unique", "properties": ["id"]},
+        {"type": "btree", "properties": ["title"]},
+        {"type": "btree", "properties": ["difficulty"]},
+        {"type": "fulltext", "properties": ["title", "content", "summary"]}
+      ]
+    },
+    {
+      "name": "Assignment",
+      "description": "Homework assignment for students",
+      "properties": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Unique identifier for the assignment"
+        },
+        {
+          "name": "lesson_id",
+          "type": "string",
+          "required": true,
+          "description": "ID of the parent lesson"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "description": "Title of the assignment"
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "required": true,
+          "description": "Description of the assignment"
+        },
+        {
+          "name": "requirements",
+          "type": "array",
+          "items": {"type": "string"},
+          "required": false,
+          "description": "List of requirements"
+        },
+        {
+          "name": "ideal_answer",
+          "type": "text",
+          "required": false,
+          "description": "Ideal answer for reference"
+        },
+        {
+          "name": "max_attempts",
+          "type": "integer",
+          "required": false,
+          "description": "Maximum number of attempts allowed"
+        },
+        {
+          "name": "deadline",
+          "type": "datetime",
+          "required": false,
+          "description": "Submission deadline"
+        },
+        {
+          "name": "created_at",
+          "type": "datetime",
+          "required": true,
+          "description": "Creation timestamp"
+        },
+        {
+          "name": "updated_at",
+          "type": "datetime",
+          "required": true,
+          "description": "Last update timestamp"
+        }
+      ],
+      "indexes": [
+        {"type": "unique", "properties": ["id"]},
+        {"type": "btree", "properties": ["lesson_id"]},
+        {"type": "btree", "properties": ["title"]}
+      ]
+    },
+    {
+      "name": "Student",
+      "description": "Student enrolled in the course",
+      "properties": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Unique identifier for the student"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Full name of the student"
+        },
+        {
+          "name": "email",
+          "type": "string",
+          "required": false,
+          "description": "Email address"
+        },
+        {
+          "name": "registration_date",
+          "type": "datetime",
+          "required": true,
+          "description": "Registration date"
+        },
+        {
+          "name": "level",
+          "type": "enum",
+          "values": ["beginner", "intermediate", "advanced"],
+          "required": false,
+          "description": "Current skill level"
+        },
+        {
+          "name": "progress",
+          "type": "float",
+          "required": false,
+          "description": "Overall progress percentage"
+        },
+        {
+          "name": "created_at",
+          "type": "datetime",
+          "required": true,
+          "description": "Creation timestamp"
+        },
+        {
+          "name": "updated_at",
+          "type": "datetime",
+          "required": true,
+          "description": "Last update timestamp"
+        }
+      ],
+      "indexes": [
+        {"type": "unique", "properties": ["id"]},
+        {"type": "unique", "properties": ["email"]},
+        {"type": "btree", "properties": ["level"]},
+        {"type": "btree", "properties": ["progress"]}
+      ]
+    },
+    {
+      "name": "Submission",
+      "description": "Student's homework submission",
+      "properties": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Unique identifier for the submission"
+        },
+        {
+          "name": "assignment_id",
+          "type": "string",
+          "required": true,
+          "description": "ID of the assignment"
+        },
+        {
+          "name": "student_id",
+          "type": "string",
+          "required": true,
+          "description": "ID of the student"
+        },
+        {
+          "name": "content",
+          "type": "text",
+          "required": true,
+          "description": "Submission content"
+        },
+        {
+          "name": "status",
+          "type": "enum",
+          "values": ["pending", "accepted", "rejected"],
+          "required": false,
+          "description": "Submission status"
+        },
+        {
+          "name": "submitted_at",
+          "type": "datetime",
+          "required": true,
+          "description": "Submission timestamp"
+        },
+        {
+          "name": "score",
+          "type": "float",
+          "required": false,
+          "description": "Score received"
+        },
+        {
+          "name": "feedback",
+          "type": "text",
+          "required": false,
+          "description": "Feedback from teacher/AI"
+        },
+        {
+          "name": "checked_at",
+          "type": "datetime",
+          "required": false,
+          "description": "Check timestamp"
+        },
+        {
+          "name": "imageUrls",
+          "type": "array",
+          "items": {"type": "string"},
+          "required": false,
+          "description": "URLs of submitted images"
+        },
+        {
+          "name": "fileUrls",
+          "type": "array",
+          "items": {"type": "string"},
+          "required": false,
+          "description": "URLs of submitted files"
+        }
+      ],
+      "indexes": [
+        {"type": "unique", "properties": ["id"]},
+        {"type": "btree", "properties": ["assignment_id"]},
+        {"type": "btree", "properties": ["student_id"]},
+        {"type": "btree", "properties": ["status"]},
+        {"type": "btree", "properties": ["submitted_at"]}
+      ]
+    },
+    {
+      "name": "Concept",
+      "description": "Educational concept or topic",
+      "properties": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Unique identifier for the concept"
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "required": true,
+          "description": "Name of the concept"
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "required": true,
+          "description": "Description of the concept"
+        },
+        {
+          "name": "category",
+          "type": "enum",
+          "values": ["tool", "platform", "technique", "concept", "other"],
+          "required": false,
+          "description": "Category of the concept"
+        },
+        {
+          "name": "difficulty",
+          "type": "enum",
+          "values": ["beginner", "intermediate", "advanced"],
+          "required": false,
+          "description": "Difficulty level"
+        },
+        {
+          "name": "prerequisites",
+          "type": "array",
+          "items": {"type": "string"},
+          "required": false,
+          "description": "List of prerequisite concept IDs"
+        },
+        {
+          "name": "created_at",
+          "type": "datetime",
+          "required": true,
+          "description": "Creation timestamp"
+        },
+        {
+          "name": "updated_at",
+          "type": "datetime",
+          "required": true,
+          "description": "Last update timestamp"
+        }
+      ],
+      "indexes": [
+        {"type": "unique", "properties": ["id"]},
+        {"type": "unique", "properties": ["name"]},
+        {"type": "btree", "properties": ["category"]},
+        {"type": "btree", "properties": ["difficulty"]},
+        {"type": "fulltext", "properties": ["name", "description"]}
+      ]
+    },
+    {
+      "name": "Resource",
+      "description": "Educational resource (video, document, etc.)",
+      "properties": [
+        {
+          "name": "id",
+          "type": "string",
+          "required": true,
+          "description": "Unique identifier for the resource"
+        },
+        {
+          "name": "type",
+          "type": "enum",
+          "values": ["video", "document", "image", "link", "tool"],
+          "required": true,
+          "description": "Type of resource"
+        },
+        {
+          "name": "url",
+          "type": "string",
+          "required": true,
+          "description": "URL of the resource"
+        },
+        {
+          "name": "title",
+          "type": "string",
+          "required": true,
+          "description": "Title of the resource"
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "required": false,
+          "description": "Description of the resource"
+        },
+        {
+          "name": "format",
+          "type": "enum",
+          "values": ["mp4", "pdf", "jpg", "png", "html", "other"],
+          "required": false,
+          "description": "Format of the resource"
+        },
+        {
+          "name": "created_at",
+          "type": "datetime",
+          "required": true,
+          "description": "Creation timestamp"
+        },
+        {
+          "name": "updated_at",
+          "type": "datetime",
+          "required": true,
+          "description": "Last update timestamp"
+        }
+      ],
+      "indexes": [
+        {"type": "unique", "properties": ["id"]},
+        {"type": "btree", "properties": ["type"]},
+        {"type": "btree", "properties": ["format"]}
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "name": "CONTAINS",
+      "description": "Lesson contains assignment",
+      "from": "Lesson",
+      "to": "Assignment",
+      "properties": [
+        {
+          "name": "order",
+          "type": "integer",
+          "required": false,
+          "description": "Order of the assignment in the lesson"
+        },
+        {
+          "name": "required",
+          "type": "boolean",
+          "required": false,
+          "description": "Whether the assignment is required"
+        }
+      ]
+    },
+    {
+      "name": "STUDIES",
+      "description": "Student studies lesson",
+      "from": "Student",
+      "to": "Lesson",
+      "properties": [
+        {
+          "name": "progress",
+          "type": "float",
+          "required": false,
+          "description": "Progress percentage"
+        },
+        {
+          "name": "started_at",
+          "type": "datetime",
+          "required": false,
+          "description": "When student started studying"
+        },
+        {
+          "name": "completed_at",
+          "type": "datetime",
+          "required": false,
+          "description": "When student completed the lesson"
+        }
+      ]
+    },
+    {
+      "name": "SUBMITS",
+      "description": "Student submits assignment",
+      "from": "Student",
+      "to": "Assignment",
+      "properties": [
+        {
+          "name": "submission_id",
+          "type": "string",
+          "required": true,
+          "description": "ID of the submission"
+        },
+        {
+          "name": "attempts",
+          "type": "integer",
+          "required": false,
+          "description": "Number of attempts"
+        },
+        {
+          "name": "time_spent",
+          "type": "integer",
+          "required": false,
+          "description": "Time spent in minutes"
+        }
+      ]
+    },
+    {
+      "name": "EVALUATES",
+      "description": "Submission evaluates concept mastery",
+      "from": "Submission",
+      "to": "Concept",
+      "properties": [
+        {
+          "name": "mastery_level",
+          "type": "float",
+          "required": false,
+          "description": "Level of mastery (0-1)"
+        },
+        {
+          "name": "evidence",
+          "type": "text",
+          "required": false,
+          "description": "Evidence of mastery"
+        }
+      ]
+    },
+    {
+      "name": "REQUIRES",
+      "description": "Concept requires another concept as prerequisite",
+      "from": "Concept",
+      "to": "Concept",
+      "properties": [
+        {
+          "name": "strength",
+          "type": "float",
+          "required": false,
+          "description": "Strength of the requirement (0-1)"
+        },
+        {
+          "name": "description",
+          "type": "text",
+          "required": false,
+          "description": "Description of the requirement"
+        }
+      ]
+    },
+    {
+      "name": "USES",
+      "description": "Lesson uses resource",
+      "from": "Lesson",
+      "to": "Resource",
+      "properties": [
+        {
+          "name": "purpose",
+          "type": "enum",
+          "values": ["required", "optional", "reference", "example"],
+          "required": false,
+          "description": "Purpose of the resource"
+        },
+        {
+          "name": "importance",
+          "type": "integer",
+          "required": false,
+          "description": "Importance level (1-10)"
+        }
+      ]
+    },
+    {
+      "name": "TEACHES",
+      "description": "Lesson teaches concept",
+      "from": "Lesson",
+      "to": "Concept",
+      "properties": [
+        {
+          "name": "depth",
+          "type": "integer",
+          "required": false,
+          "description": "Depth of coverage (1-10)"
+        },
+        {
+          "name": "method",
+          "type": "enum",
+          "values": ["theory", "practice", "example", "demonstration"],
+          "required": false,
+          "description": "Teaching method"
+        }
+      ]
+    }
+  ]
+}
+
