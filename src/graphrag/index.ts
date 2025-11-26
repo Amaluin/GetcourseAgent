@@ -136,6 +136,20 @@ export class GraphRAG {
   }
 
   /**
+   * Проверка существования урока в GraphRAG
+   */
+  async hasLesson(lessonId: string): Promise<boolean> {
+    return await this.neo4jClient.lessonExists(lessonId);
+  }
+
+  /**
+   * Получение информации об уроке из GraphRAG
+   */
+  async getLessonInfo(lessonId: string): Promise<{ id: string; title: string; chunkCount: number } | null> {
+    return await this.neo4jClient.getLessonInfo(lessonId);
+  }
+
+  /**
    * 2. ДОБАВЛЕНИЕ СТУДЕНТА
    */
   async addStudent(

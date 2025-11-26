@@ -255,37 +255,103 @@ export async function checkHomework(submission: HomeworkSubmission, graphRAGCont
     Название урока: ${submission.assignmentTitle}
   `;
 
-  // ДОБАВЛЯЕМ: Контекст из GraphRAG (база знаний)
+  // Ограничения длины для оптимизации токенов (Groq лимит 12000)
+  const MAX_TASK_LENGTH = 2000;           // Максимум символов для текста задания
+  const MAX_IDEAL_ANSWER_LENGTH = 1500;   // Максимум для идеального ответа
+  const MAX_LESSON_SUMMARY_LENGTH = 1000;  // Максимум для выжимки урока
+  const MAX_STUDENT_TEXT_LENGTH = 3000;    // Максимум для ответа студента
+  const MAX_JSON_CONTENT_LENGTH = 2000;    // Максимум для JSON файла
+  const MAX_GRAPHRAG_CONTEXT_LENGTH = 1500; // Максимум для контекста GraphRAG
+
+  // ДОБАВЛЯЕМ: Контекст из GraphRAG (база знаний) - ограниченная длина
   if (graphRAGContext) {
+    const limitedContext = graphRAGContext.length > MAX_GRAPHRAG_CONTEXT_LENGTH
+      ? graphRAGContext.substring(0, MAX_GRAPHRAG_CONTEXT_LENGTH) + '... [обрезано]'
+      : graphRAGContext;
     console.log('\n=== КОНТЕКСТ ИЗ БАЗЫ ЗНАНИЙ (GraphRAG) ===');
-    console.log(graphRAGContext);
+    console.log(limitedContext);
     console.log('==========================================\n');
-    prompt += `\n\n${graphRAGContext}`;
+    prompt += `\n\n${limitedContext}`;
   }
 
-  // ДОБАВЛЯЕМ: Выжимка урока (что объяснялось)
+  // ДОБАВЛЯЕМ: Выжимка урока (что объяснялось) - ограниченная длина
   if (submission.lessonContent?.summary) {
+    const lessonSummary = submission.lessonContent.summary.length > MAX_LESSON_SUMMARY_LENGTH
+      ? submission.lessonContent.summary.substring(0, MAX_LESSON_SUMMARY_LENGTH) + '... [обрезано]'
+      : submission.lessonContent.summary;
     console.log('\n=== ВЫЖИМКА УРОКА ===');
-    console.log(submission.lessonContent.summary);
+    console.log(lessonSummary);
     console.log('=====================\n');
-    prompt += `\n\n=== ЧТО ОБЪЯСНЯЛОСЬ В УРОКЕ ===\n${submission.lessonContent.summary}\n=== КОНЕЦ ВЫЖИМКИ УРОКА ===`;
+    prompt += `\n\n=== ЧТО ОБЪЯСНЯЛОСЬ В УРОКЕ ===\n${lessonSummary}\n=== КОНЕЦ ВЫЖИМКИ УРОКА ===`;
   }
 
   if (submission.taskDescription) {
-    console.log('\n=== ТЕКСТ ЗАДАНИЯ (ПОЛНЫЙ) ===');
-    console.log(submission.taskDescription);
-    console.log('==============================\n');
-    prompt += `\n\nТекст задания:\n${submission.taskDescription}`;
+    const taskDesc = submission.taskDescription.length > MAX_TASK_LENGTH
+      ? submission.taskDescription.substring(0, MAX_TASK_LENGTH) + '... [обрезано]'
+      : submission.taskDescription;
+    console.log('\n=== ТЕКСТ ЗАДАНИЯ ===');
+    console.log(taskDesc);
+    console.log('======================\n');
+    prompt += `\n\nТекст задания:\n${taskDesc}`;
   }
 
   if (submission.idealAnswer) {
-    console.log('\n=== ИДЕАЛЬНЫЙ ОТВЕТ (ПОЛНЫЙ) ===');
-    console.log(submission.idealAnswer);
-    console.log('================================\n');
-    prompt += `\n\nИдеальный ответ (эталон):\n${submission.idealAnswer}`;
+    const idealAns = submission.idealAnswer.length > MAX_IDEAL_ANSWER_LENGTH
+      ? submission.idealAnswer.substring(0, MAX_IDEAL_ANSWER_LENGTH) + '... [обрезано]'
+      : submission.idealAnswer;
+    console.log('\n=== ИДЕАЛЬНЫЙ ОТВЕТ ===');
+    console.log(idealAns);
+    console.log('========================\n');
+    prompt += `\n\nИдеальный ответ (эталон):\n${idealAns}`;
   }
 
-  prompt += `\n\nОтвет студента:\n"${submission.text}"`;
+  // Ограничиваем длину ответа студента
+  const studentText = submission.text.length > MAX_STUDENT_TEXT_LENGTH
+    ? submission.text.substring(0, MAX_STUDENT_TEXT_LENGTH) + '... [обрезано]'
+    : submission.text;
+  prompt += `\n\nОтвет студента:\n"${studentText}"`;
+  
+  if (submission.text.length > MAX_STUDENT_TEXT_LENGTH) {
+    console.log(`   ⚠️  Ответ студента обрезан с ${submission.text.length} до ${MAX_STUDENT_TEXT_LENGTH} символов`);
+  }
+
+  // Проверяем наличие ссылок в ответе студента
+  const urlPattern = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9-]+\.[a-zA-Z]{2,}[^\s]*)/gi;
+  const linksInText = submission.text.match(urlPattern) || [];
+  const hasLinks = linksInText.length > 0;
+  
+  // Проверяем, требуется ли ссылка в задании
+  const taskText = (submission.taskDescription || '') + (submission.idealAnswer || '');
+  const requiresLink = /(ссылка|link|url|http|https|адрес|сайт|страница|проект|приложение|деплой|deploy)/i.test(taskText);
+  
+  console.log(`   🔗 Проверка ссылок:`);
+  console.log(`      Требуется ссылка в задании: ${requiresLink ? '✅ Да' : '❌ Нет'}`);
+  console.log(`      Найдено ссылок в ответе: ${linksInText.length}`);
+  if (linksInText.length > 0) {
+    console.log(`      Ссылки: ${linksInText.slice(0, 3).join(', ')}${linksInText.length > 3 ? '...' : ''}`);
+  }
+  
+  // Добавляем информацию о ссылках в промпт
+  if (requiresLink) {
+    if (hasLinks) {
+      prompt += `\n\n=== ССЫЛКИ В ОТВЕТЕ СТУДЕНТА ===`;
+      prompt += `\nСтудент предоставил ${linksInText.length} ссылку(и):`;
+      linksInText.forEach((link, i) => {
+        prompt += `\n${i + 1}. ${link}`;
+      });
+      prompt += `\n=== КОНЕЦ СПИСКА ССЫЛОК ===`;
+    } else {
+      prompt += `\n\n⚠️ ВАЖНО: В задании требуется ссылка, но студент НЕ предоставил ссылку в ответе!`;
+      prompt += `\nЭто является ошибкой - студент не выполнил требование задания.`;
+    }
+  } else if (hasLinks) {
+    prompt += `\n\n=== ССЫЛКИ В ОТВЕТЕ СТУДЕНТА ===`;
+    prompt += `\nСтудент предоставил ${linksInText.length} ссылку(и) (хотя в задании не требовалось):`;
+    linksInText.forEach((link, i) => {
+      prompt += `\n${i + 1}. ${link}`;
+    });
+    prompt += `\n=== КОНЕЦ СПИСКА ССЫЛОК ===`;
+  }
 
   // Анализируем JSON и ZIP файлы
   if (submission.fileUrls.length > 0) {
@@ -296,14 +362,21 @@ export async function checkHomework(submission: HomeworkSubmission, graphRAGCont
       if (fileName.endsWith('.json')) {
         const jsonContent = await readJsonFile(fileUrl);
         if (jsonContent) {
-          prompt += `\n\n=== СОДЕРЖИМОЕ JSON ФАЙЛА (${fileName}) ===\n${jsonContent.substring(0, 3000)}\n=== КОНЕЦ JSON ФАЙЛА ===`;
-          console.log(`   ✅ Прочитан JSON файл (${jsonContent.length} символов)`);
+          const limitedJson = jsonContent.length > MAX_JSON_CONTENT_LENGTH
+            ? jsonContent.substring(0, MAX_JSON_CONTENT_LENGTH) + '... [обрезано]'
+            : jsonContent;
+          prompt += `\n\n=== СОДЕРЖИМОЕ JSON ФАЙЛА (${fileName}) ===\n${limitedJson}\n=== КОНЕЦ JSON ФАЙЛА ===`;
+          console.log(`   ✅ Прочитан JSON файл (${jsonContent.length} символов, отправлено ${limitedJson.length})`);
         }
       } else if (fileName.endsWith('.zip')) {
          const zipContent = await readZipFile(fileUrl);
          if (zipContent) {
-             prompt += `\n\n=== СОДЕРЖИМОЕ ZIP АРХИВА (${fileName}) ===\n${zipContent}\n=== КОНЕЦ ZIP АРХИВА ===`;
-             console.log(`   ✅ Прочитан ZIP архив`);
+             // ZIP архивы тоже ограничиваем
+             const limitedZip = zipContent.length > MAX_JSON_CONTENT_LENGTH
+               ? zipContent.substring(0, MAX_JSON_CONTENT_LENGTH) + '... [обрезано]'
+               : zipContent;
+             prompt += `\n\n=== СОДЕРЖИМОЕ ZIP АРХИВА (${fileName}) ===\n${limitedZip}\n=== КОНЕЦ ZIP АРХИВА ===`;
+             console.log(`   ✅ Прочитан ZIP архив (${zipContent.length} символов, отправлено ${limitedZip.length})`);
          }
       } else {
         prompt += `\n\nПрикреплен файл: ${fileName}`;
@@ -362,6 +435,7 @@ export async function checkHomework(submission: HomeworkSubmission, graphRAGCont
        - Если в ТЕКСТЕ ЗАДАНИЯ явно требуется JSON файл - проанализируй его содержимое.
        - Если в ТЕКСТЕ ЗАДАНИЯ явно требуются скриншоты - проверь их наличие и содержимое.
        - Если в ТЕКСТЕ ЗАДАНИЯ требуется текстовый ответ - оцени его.
+       - КРИТИЧЕСКИ ВАЖНО: Если в ТЕКСТЕ ЗАДАНИЯ требуется ссылка (ссылка, link, url, адрес, сайт, проект, приложение, деплой) - проверь её наличие в ответе студента. Если ссылка НЕ предоставлена - это ОШИБКА, отклони работу и укажи это в комментарии!
        - НЕ ПРИДУМЫВАЙ требования, которых нет в тексте задания!
     4. Сравни ответ студента с ИДЕАЛЬНЫМ ОТВЕТОМ (если он указан).
     5. ВАЖНО: Если студент прислал скриншоты, на которых ВИДНО выполненное задание - СЧИТАЙ ЭТО ЗАЧЕТОМ, даже если формально просили текст или ссылку. Главное - суть: работа выполнена.

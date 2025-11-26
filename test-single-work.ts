@@ -86,70 +86,108 @@ async function main() {
       console.log('='.repeat(70));
       
       try {
-        // Парсим урок
-        console.log(`\n📖 Подготовка к парсингу урока`);
-        console.log(`   🆔 ID урока: ${submission.lessonId}`);
-        console.log(`   📝 Название задания: ${submission.assignmentTitle}`);
-        console.log(`   👤 Студент: ${submission.studentName}`);
-        console.log(`   ⏱️  Начало парсинга: ${new Date().toLocaleTimeString()}`);
-        console.log(`\n   ⏳ Вызываю функцию getLessonContent()...\n`);
-        
-        const parsingStartTime = Date.now();
-        submission.lessonContent = await getLessonContent(page, submission.lessonId);
-        const parsingTime = Date.now() - parsingStartTime;
-        
-        console.log(`\n   ✅ Парсинг урока завершен`);
-        console.log(`   ⏱️  Время парсинга: ${parsingTime}ms (${(parsingTime / 1000).toFixed(1)} сек)`);
-        
-        if (!submission.lessonContent) {
-          console.log('⚠️  Не удалось получить содержимое урока');
-        } else {
-          console.log(`✅ Урок успешно проанализирован!`);
-          console.log(`   📄 Название: ${submission.lessonContent.title}`);
-          console.log(`   📝 Длина текста: ${submission.lessonContent.fullText.length} символов`);
+        // Проверяем, есть ли урок уже в GraphRAG
+        let lessonInRAG = false;
+        if (graphRAG) {
+          console.log(`\n🔍 Проверяю, есть ли урок в GraphRAG...`);
+          lessonInRAG = await graphRAG.hasLesson(submission.lessonId);
           
-          // Сохраняем урок в GraphRAG с chunking + embeddings
-          if (graphRAG) {
-            console.log(`\n🧩 Обработка урока в GraphRAG:`);
-            console.log(`   - Chunking (512 токенов + overlap 50)...`);
-            
-            const result = await graphRAG.addLesson(
-              submission.lessonId,
-              submission.lessonContent.title,
-              submission.lessonContent.fullText,
-              0
-            );
-            
-            console.log(`   ✅ Урок добавлен:`);
-            console.log(`      📄 Чанков: ${result.chunks}`);
-            console.log(`      🔤 Токенов: ${result.tokens}`);
-            console.log(`      📊 Средний размер: ${Math.round(result.tokens / result.chunks)} токенов`);
-            
-            // Добавляем студента (с ссылкой на профиль)
-            const studentId = `student_${Buffer.from(submission.studentName).toString('base64').slice(0, 16)}`;
-            
-            // Извлекаем ID из URL если есть
-            let gcId: string | undefined;
-            if (submission.studentUrl) {
-              const idMatch = submission.studentUrl.match(/(?:user[\/=]|id[=:]|user_id[=:])(\d+)/i);
-              if (idMatch) {
-                gcId = idMatch[1];
-              }
+          if (lessonInRAG) {
+            const lessonInfo = await graphRAG.getLessonInfo(submission.lessonId);
+            if (lessonInfo) {
+              console.log(`   ✅ Урок найден в GraphRAG!`);
+              console.log(`      📄 Название: ${lessonInfo.title}`);
+              console.log(`      📊 Чанков: ${lessonInfo.chunkCount}`);
+              console.log(`   ⚡ Пропускаю парсинг, использую данные из GraphRAG`);
             }
-            
-            await graphRAG.addStudent(studentId, submission.studentName, undefined, gcId, submission.studentUrl);
-            console.log(`   ✅ Студент добавлен: ${submission.studentName}`);
-            if (submission.studentUrl) {
-              console.log(`      🔗 Ссылка: ${submission.studentUrl}`);
-            }
-            if (gcId) {
-              console.log(`      🆔 GetCourse ID: ${gcId}`);
-            }
-            
-            // Отмечаем урок как пройденный
-            await graphRAG.markLessonCompleted(studentId, submission.lessonId);
-            console.log(`   ✅ Урок отмечен как пройденный`);
+          } else {
+            console.log(`   ❌ Урок не найден в GraphRAG, нужно парсить`);
           }
+        }
+        
+        // Парсим урок только если его нет в GraphRAG
+        if (!lessonInRAG) {
+          console.log(`\n📖 Подготовка к парсингу урока`);
+          console.log(`   🆔 ID урока: ${submission.lessonId}`);
+          console.log(`   📝 Название задания: ${submission.assignmentTitle}`);
+          console.log(`   👤 Студент: ${submission.studentName}`);
+          console.log(`   ⏱️  Начало парсинга: ${new Date().toLocaleTimeString()}`);
+          console.log(`\n   ⏳ Вызываю функцию getLessonContent()...\n`);
+          
+          const parsingStartTime = Date.now();
+          submission.lessonContent = await getLessonContent(page, submission.lessonId);
+          const parsingTime = Date.now() - parsingStartTime;
+          
+          console.log(`\n   ✅ Парсинг урока завершен`);
+          console.log(`   ⏱️  Время парсинга: ${parsingTime}ms (${(parsingTime / 1000).toFixed(1)} сек)`);
+          
+          if (!submission.lessonContent) {
+            console.log('⚠️  Не удалось получить содержимое урока');
+          } else {
+            console.log(`✅ Урок успешно проанализирован!`);
+            console.log(`   📄 Название: ${submission.lessonContent.title}`);
+            console.log(`   📝 Длина текста: ${submission.lessonContent.fullText.length} символов`);
+            
+            // Сохраняем урок в GraphRAG с chunking + embeddings
+            if (graphRAG) {
+              console.log(`\n🧩 Обработка урока в GraphRAG:`);
+              console.log(`   - Chunking (512 токенов + overlap 50)...`);
+              
+              const result = await graphRAG.addLesson(
+                submission.lessonId,
+                submission.lessonContent.title,
+                submission.lessonContent.fullText,
+                0
+              );
+              
+              console.log(`   ✅ Урок добавлен:`);
+              console.log(`      📄 Чанков: ${result.chunks}`);
+              console.log(`      🔤 Токенов: ${result.tokens}`);
+              console.log(`      📊 Средний размер: ${Math.round(result.tokens / result.chunks)} токенов`);
+            }
+          }
+        } else {
+          // Урок уже в GraphRAG, создаем минимальный lessonContent для совместимости
+          const lessonInfo = await graphRAG!.getLessonInfo(submission.lessonId);
+          if (lessonInfo) {
+            submission.lessonContent = {
+              lessonId: lessonInfo.id,
+              title: lessonInfo.title,
+              fullText: '', // Не нужен, т.к. данные в GraphRAG
+              videoSections: [],
+              summary: `Урок "${lessonInfo.title}" уже обработан в GraphRAG (${lessonInfo.chunkCount} чанков)`,
+              imageUrls: [],
+              fileUrls: []
+            };
+            console.log(`   ✅ Использую данные из GraphRAG для урока "${lessonInfo.title}"`);
+          }
+        }
+        
+        // Добавляем студента и отмечаем урок как пройденный (вне зависимости от парсинга)
+        if (graphRAG) {
+          const studentId = `student_${Buffer.from(submission.studentName).toString('base64').slice(0, 16)}`;
+          
+          // Извлекаем ID из URL если есть
+          let gcId: string | undefined;
+          if (submission.studentUrl) {
+            const idMatch = submission.studentUrl.match(/(?:user[\/=]|id[=:]|user_id[=:])(\d+)/i);
+            if (idMatch) {
+              gcId = idMatch[1];
+            }
+          }
+          
+          await graphRAG.addStudent(studentId, submission.studentName, undefined, gcId, submission.studentUrl);
+          console.log(`   ✅ Студент добавлен: ${submission.studentName}`);
+          if (submission.studentUrl) {
+            console.log(`      🔗 Ссылка: ${submission.studentUrl}`);
+          }
+          if (gcId) {
+            console.log(`      🆔 GetCourse ID: ${gcId}`);
+          }
+          
+          // Отмечаем урок как пройденный
+          await graphRAG.markLessonCompleted(studentId, submission.lessonId);
+          console.log(`   ✅ Урок отмечен как пройденный`);
         }
         
         // Возвращаемся в ленту

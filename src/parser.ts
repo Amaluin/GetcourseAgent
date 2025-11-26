@@ -1,5 +1,6 @@
 import { Page } from 'playwright';
 import { HomeworkSubmission } from './types';
+import { config } from './config';
 
 export async function getUncheckedSubmissions(page: Page): Promise<HomeworkSubmission[]> {
   console.log('👀 Сканируем ленту ответов...');
@@ -19,47 +20,358 @@ export async function getUncheckedSubmissions(page: Page): Promise<HomeworkSubmi
 
   const submissions: HomeworkSubmission[] = [];
 
-  for (const wrapper of limitedWrappers) {
+  for (let i = 0; i < limitedWrappers.length; i++) {
+    const wrapper = limitedWrappers[i];
+    console.log(`\n   📝 Обработка задания ${i + 1}/${limitedWrappers.length}...`);
+    console.log(`      ⏱️  Начало: ${new Date().toLocaleTimeString()}`);
+    
     try {
       // ID задания
-      const id = await wrapper.getAttribute('data-id') || '';
+      console.log(`      🔍 ШАГ 1: Получаю ID задания...`);
+      console.log(`         ⏳ Ожидание атрибута data-id (таймаут 5 сек)...`);
+      const idStartTime = Date.now();
+      let id = '';
+      try {
+        id = await Promise.race([
+          wrapper.getAttribute('data-id'),
+          new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+        ]) || '';
+      } catch (error) {
+        console.log(`         ⚠️  Таймаут при получении data-id, пробую без таймаута...`);
+        id = await wrapper.getAttribute('data-id').catch(() => '') || '';
+      }
+      const idTime = Date.now() - idStartTime;
+      console.log(`         ✅ ID получен за ${idTime}ms: ${id || 'не найден'}`);
       
       // Имя студента и ссылка на профиль
-      const studentName = await wrapper.locator('.user-profile-link .text').first().innerText().catch(() => 'Неизвестный студент');
-      const studentProfileLink = await wrapper.locator('.user-profile-link').first().getAttribute('href').catch(() => null);
-      const studentUrl = studentProfileLink ? (studentProfileLink.startsWith('http') ? studentProfileLink : `${config.gcUrl}${studentProfileLink}`) : undefined;
+      console.log(`      👤 ШАГ 2: Получаю имя студента...`);
+      console.log(`         ⏳ Ожидание элемента .user-profile-link .text (таймаут 5 сек)...`);
+      const nameStartTime = Date.now();
+      let studentName = 'Неизвестный студент';
+      try {
+        studentName = await Promise.race([
+          wrapper.locator('.user-profile-link .text').first().innerText(),
+          new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+        ]);
+      } catch (error) {
+        console.log(`         ⚠️  Таймаут при получении имени, пробую без таймаута...`);
+        studentName = await wrapper.locator('.user-profile-link .text').first().innerText().catch(() => 'Неизвестный студент');
+      }
+      const nameTime = Date.now() - nameStartTime;
+      console.log(`         ✅ Имя получено за ${nameTime}ms: ${studentName}`);
       
-      // Текст ответа
-      const text = await wrapper.locator('.answer-text').innerText().catch(() => '');
+      console.log(`      🔗 ШАГ 3: Получаю ссылку на профиль студента...`);
+      console.log(`         ⏳ Получаю href из атрибута ссылки...`);
+      const linkStartTime = Date.now();
+      let studentUrl: string | undefined = undefined;
+      
+      try {
+        // Сначала пробуем получить href напрямую (самый надежный способ)
+        const profileLink = wrapper.locator('.user-profile-link').first();
+        const href = await profileLink.getAttribute('href').catch(() => null);
+        
+        if (href) {
+          // Формируем полный URL
+          if (href.startsWith('http://') || href.startsWith('https://')) {
+            studentUrl = href;
+          } else if (href.startsWith('/')) {
+            // Относительный путь от корня
+            studentUrl = `${config.gcUrl}${href}`;
+          } else {
+            // Относительный путь
+            const currentUrl = page.url();
+            const baseUrl = currentUrl.split('/').slice(0, 3).join('/');
+            studentUrl = `${baseUrl}/${href}`;
+          }
+          console.log(`         ✅ URL из href атрибута: ${studentUrl}`);
+          
+          // Проверяем, что это действительно ссылка на профиль (не на ленту ответов)
+          if (studentUrl.includes('/user/') || studentUrl.includes('/profile/') || studentUrl.includes('user_id') || studentUrl.includes('user=')) {
+            console.log(`         ✅ Это ссылка на профиль студента`);
+          } else {
+            console.log(`         ⚠️  Похоже, это не ссылка на профиль, пробую кликнуть для проверки...`);
+            
+            // Если href выглядит подозрительно, пробуем кликнуть и проверить URL
+            const currentUrl = page.url();
+            console.log(`         📍 Текущий URL перед кликом: ${currentUrl}`);
+            
+            try {
+              // Кликаем с ожиданием навигации
+              await Promise.all([
+                page.waitForURL(url => {
+                  const newUrl = url.toString();
+                  return newUrl !== currentUrl && 
+                         (newUrl.includes('/user/') || 
+                          newUrl.includes('/profile/') || 
+                          newUrl.includes('user_id') || 
+                          newUrl.includes('user='));
+                }, { timeout: 3000 }).catch(() => null),
+                profileLink.click({ timeout: 3000 })
+              ]);
+              
+              // Ждем загрузки
+              await page.waitForTimeout(1000);
+              
+              // Проверяем новый URL
+              const newUrl = page.url();
+              console.log(`         📍 URL после клика: ${newUrl}`);
+              
+              if (newUrl !== currentUrl && 
+                  (newUrl.includes('/user/') || 
+                   newUrl.includes('/profile/') || 
+                   newUrl.includes('user_id') || 
+                   newUrl.includes('user='))) {
+                studentUrl = newUrl;
+                console.log(`         ✅ URL профиля получен через навигацию: ${studentUrl}`);
+                
+                // Возвращаемся назад
+                console.log(`         🔙 Возвращаюсь назад...`);
+                await page.goBack({ waitUntil: 'domcontentloaded' });
+                await page.waitForTimeout(1000);
+                console.log(`         ✅ Вернулся на страницу с заданиями`);
+              } else {
+                console.log(`         ⚠️  URL не изменился на профиль, используем href: ${studentUrl}`);
+              }
+            } catch (clickError) {
+              console.log(`         ⚠️  Ошибка при клике, используем href: ${studentUrl}`);
+            }
+          }
+        } else {
+          console.log(`         ⚠️  Href не найден, пробую кликнуть...`);
+          
+          // Если href нет, пробуем кликнуть
+          const currentUrl = page.url();
+          const isVisible = await profileLink.isVisible({ timeout: 2000 }).catch(() => false);
+          
+          if (isVisible) {
+            try {
+              await Promise.all([
+                page.waitForURL(url => {
+                  const newUrl = url.toString();
+                  return newUrl !== currentUrl && 
+                         (newUrl.includes('/user/') || 
+                          newUrl.includes('/profile/') || 
+                          newUrl.includes('user_id') || 
+                          newUrl.includes('user='));
+                }, { timeout: 5000 }).catch(() => null),
+                profileLink.click({ timeout: 5000 })
+              ]);
+              
+              await page.waitForTimeout(1500);
+              
+              const newUrl = page.url();
+              if (newUrl !== currentUrl && 
+                  (newUrl.includes('/user/') || 
+                   newUrl.includes('/profile/') || 
+                   newUrl.includes('user_id') || 
+                   newUrl.includes('user='))) {
+                studentUrl = newUrl;
+                console.log(`         ✅ URL профиля получен: ${studentUrl}`);
+                
+                // Возвращаемся назад
+                await page.goBack({ waitUntil: 'domcontentloaded' });
+                await page.waitForTimeout(1000);
+              }
+            } catch (error) {
+              console.log(`         ❌ Не удалось получить URL через клик`);
+            }
+          }
+        }
+      } catch (error: any) {
+        console.log(`         ⚠️  Ошибка при получении ссылки: ${error.message || error}`);
+      }
+      
+      const linkTime = Date.now() - linkStartTime;
+      console.log(`         ⏱️  Время получения ссылки: ${linkTime}ms`);
+      if (studentUrl) {
+        // Финальная проверка, что это не лента ответов
+        if (studentUrl.includes('/answers/') || studentUrl.includes('/stream/')) {
+          console.log(`         ⚠️  ВНИМАНИЕ: Получен URL ленты ответов вместо профиля!`);
+          studentUrl = undefined;
+        } else {
+          console.log(`         🔗 Финальный URL профиля: ${studentUrl}`);
+        }
+      } else {
+        console.log(`         ⚠️  Ссылка на профиль не найдена`);
+      }
+      
+      // Текст ответа - быстрая проверка через JavaScript
+      console.log(`      💬 ШАГ 4: Получаю текст ответа...`);
+      console.log(`         ⏳ Быстрая проверка наличия текста через JavaScript...`);
+      const textStartTime = Date.now();
+      let text = '';
+      
+      try {
+        // Используем JavaScript для быстрого получения текста без ожидания загрузки
+        text = await wrapper.evaluate((element) => {
+          // Ищем элемент .answer-text внутри wrapper
+          const answerText = element.querySelector('.answer-text');
+          if (answerText) {
+            return (answerText as HTMLElement).textContent || (answerText as HTMLElement).innerText || '';
+          }
+          // Если не нашли, пробуем другие селекторы
+          const textSelectors = [
+            '.answer-content',
+            '.answer-body',
+            '.text-content',
+            '[class*="answer"]',
+            '[class*="text"]'
+          ];
+          for (const selector of textSelectors) {
+            const el = element.querySelector(selector);
+            if (el) {
+              const htmlEl = el as HTMLElement;
+              const content = htmlEl.textContent || htmlEl.innerText || '';
+              if (content.trim().length > 0) {
+                return content.trim();
+              }
+            }
+          }
+          return '';
+        });
+        
+        // Если через JavaScript не получили, пробуем через Playwright (но с коротким таймаутом)
+        if (!text || text.trim().length === 0) {
+          console.log(`         ⚠️  JavaScript не нашел текст, пробую через Playwright (таймаут 2 сек)...`);
+          try {
+            text = await Promise.race([
+              wrapper.locator('.answer-text').innerText({ timeout: 2000 }),
+              new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000))
+            ]);
+          } catch (error) {
+            console.log(`         ⚠️  Playwright тоже не нашел текст, оставляю пустым`);
+            text = '';
+          }
+        }
+      } catch (error) {
+        console.log(`         ⚠️  Ошибка при получении текста: ${error}`);
+        text = '';
+      }
+      
+      const textTime = Date.now() - textStartTime;
+      console.log(`         ✅ Текст получен за ${textTime}ms: ${text.length} символов`);
+      if (text.length > 0) {
+        console.log(`         📄 Первые 100 символов: "${text.slice(0, 100).replace(/\n/g, ' ')}..."`);
+      } else {
+        console.log(`         ⚠️  Текст ответа пустой или не найден`);
+      }
       
       // Комментарии студента (дополнительные сообщения)
-      const studentComments = await wrapper.locator('.comment-text').allInnerTexts().catch(() => []);
+      console.log(`      💭 ШАГ 5: Получаю комментарии студента...`);
+      console.log(`         ⏳ Ожидание элементов .comment-text (таймаут 5 сек)...`);
+      const commentsStartTime = Date.now();
+      let studentComments: string[] = [];
+      try {
+        studentComments = await Promise.race([
+          wrapper.locator('.comment-text').allInnerTexts(),
+          new Promise<string[]>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+        ]);
+      } catch (error) {
+        console.log(`         ⚠️  Таймаут при получении комментариев, пробую без таймаута...`);
+        studentComments = await wrapper.locator('.comment-text').allInnerTexts().catch(() => []);
+      }
+      const commentsTime = Date.now() - commentsStartTime;
       const fullText = [text, ...studentComments].filter(t => t.trim()).join('\n\n---\n\n');
+      console.log(`         ✅ Комментарии получены за ${commentsTime}ms: ${studentComments.length} шт., общий текст: ${fullText.length} символов`);
       
       // Название урока/задания
-      const assignmentTitle = await wrapper.locator('.show-lesson-link').innerText().catch(() => 'Без названия');
+      console.log(`      📚 ШАГ 6: Получаю название урока...`);
+      console.log(`         ⏳ Ожидание элемента .show-lesson-link (таймаут 5 сек)...`);
+      const titleStartTime = Date.now();
+      let assignmentTitle = 'Без названия';
+      try {
+        assignmentTitle = await Promise.race([
+          wrapper.locator('.show-lesson-link').innerText(),
+          new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+        ]);
+      } catch (error) {
+        console.log(`         ⚠️  Таймаут при получении названия, пробую без таймаута...`);
+        assignmentTitle = await wrapper.locator('.show-lesson-link').innerText().catch(() => 'Без названия');
+      }
+      const titleTime = Date.now() - titleStartTime;
+      console.log(`         ✅ Название получено за ${titleTime}ms: ${assignmentTitle}`);
       
       // ID урока (из data-lesson-id)
-      const lessonId = await wrapper.getAttribute('data-lesson-id') || '';
+      console.log(`      🆔 ШАГ 7: Получаю ID урока...`);
+      console.log(`         ⏳ Ожидание атрибута data-lesson-id (таймаут 5 сек)...`);
+      const lessonIdStartTime = Date.now();
+      let lessonId = '';
+      try {
+        lessonId = await Promise.race([
+          wrapper.getAttribute('data-lesson-id'),
+          new Promise<string>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+        ]) || '';
+      } catch (error) {
+        console.log(`         ⚠️  Таймаут при получении data-lesson-id, пробую без таймаута...`);
+        lessonId = await wrapper.getAttribute('data-lesson-id').catch(() => '') || '';
+      }
+      const lessonIdTime = Date.now() - lessonIdStartTime;
+      console.log(`         ✅ ID урока получен за ${lessonIdTime}ms: ${lessonId || 'не найден'}`);
       
       // Ссылки на файлы и картинки - улучшенный поиск
-      const downloadLinks = await wrapper.locator('.answer-files a[href]').evaluateAll(links => 
-        links.map(link => link.getAttribute('href') || '').filter(href => href)
-      ) as string[];
+      console.log(`      📎 ШАГ 8: Получаю ссылки на файлы...`);
+      console.log(`         ⏳ Ожидание элементов .answer-files (таймаут 5 сек)...`);
+      const filesStartTime = Date.now();
+      let downloadLinks: string[] = [];
+      let imageDownloadLinks: string[] = [];
+      try {
+        downloadLinks = await Promise.race([
+          wrapper.locator('.answer-files a[href]').evaluateAll(links => 
+            links.map(link => link.getAttribute('href') || '').filter(href => href)
+          ),
+          new Promise<string[]>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+        ]) as string[];
+      } catch (error) {
+        console.log(`         ⚠️  Таймаут при получении файлов, пробую без таймаута...`);
+        downloadLinks = await wrapper.locator('.answer-files a[href]').evaluateAll(links => 
+          links.map(link => link.getAttribute('href') || '').filter(href => href)
+        ).catch(() => []) as string[];
+      }
       
-      const imageDownloadLinks = await wrapper.locator('.answer-files img[data-download-link]').evaluateAll(imgs => 
-        imgs.map(img => img.getAttribute('data-download-link') || '').filter(href => href)
-      ) as string[];
+      try {
+        imageDownloadLinks = await Promise.race([
+          wrapper.locator('.answer-files img[data-download-link]').evaluateAll(imgs => 
+            imgs.map(img => img.getAttribute('data-download-link') || '').filter(href => href)
+          ),
+          new Promise<string[]>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+        ]) as string[];
+      } catch (error) {
+        imageDownloadLinks = await wrapper.locator('.answer-files img[data-download-link]').evaluateAll(imgs => 
+          imgs.map(img => img.getAttribute('data-download-link') || '').filter(href => href)
+        ).catch(() => []) as string[];
+      }
       
+      const filesTime = Date.now() - filesStartTime;
       const allLinks = [...downloadLinks, ...imageDownloadLinks].filter(url => url);
       
       const imageUrls = allLinks.filter(url => /\.(jpg|jpeg|png|gif|webp)$/i.test(url));
       const otherFiles = allLinks.filter(url => !/\.(jpg|jpeg|png|gif|webp)$/i.test(url));
+      console.log(`         ✅ Файлы получены за ${filesTime}ms: файлов ${otherFiles.length}, изображений ${imageUrls.length}`);
 
       // Проверяем, что задание действительно требует проверки (есть кнопки)
-      const hasAcceptButton = await wrapper.locator('button.btn-success, .btn-success').count() > 0;
+      console.log(`      🔘 ШАГ 9: Проверяю наличие кнопок проверки...`);
+      console.log(`         ⏳ Ожидание кнопок (таймаут 5 сек)...`);
+      const buttonStartTime = Date.now();
+      let hasAcceptButton = false;
+      try {
+        const count = await Promise.race([
+          wrapper.locator('button.btn-success, .btn-success').count(),
+          new Promise<number>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000))
+        ]);
+        hasAcceptButton = count > 0;
+      } catch (error) {
+        console.log(`         ⚠️  Таймаут при проверке кнопок, пробую без таймаута...`);
+        const count = await wrapper.locator('button.btn-success, .btn-success').count().catch(() => 0);
+        hasAcceptButton = count > 0;
+      }
+      const buttonTime = Date.now() - buttonStartTime;
+      console.log(`         ✅ Проверка завершена за ${buttonTime}ms: кнопки ${hasAcceptButton ? 'найдены' : 'не найдены'}`);
+      
+      const totalTime = Date.now() - idStartTime;
+      console.log(`      ⏱️  Общее время обработки задания: ${totalTime}ms (${(totalTime / 1000).toFixed(1)} сек)`);
       
       if (hasAcceptButton && id) {
+        console.log(`      ✅ Задание добавлено в список для проверки`);
         submissions.push({
           id,
           studentName,
@@ -72,9 +384,11 @@ export async function getUncheckedSubmissions(page: Page): Promise<HomeworkSubmi
           idealAnswer: '', // Заполним позже
           taskDescription: '' // Заполним позже
         });
+      } else {
+        console.log(`      ⚠️  Задание пропущено (нет ID или кнопок проверки)`);
       }
     } catch (error) {
-      console.warn('⚠️ Ошибка при первичном парсинге задания:', error);
+      console.error(`      ❌ Ошибка при обработке задания ${i + 1}:`, error);
     }
   }
 

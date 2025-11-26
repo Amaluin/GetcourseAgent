@@ -158,6 +158,53 @@ export class Neo4jAdvancedClient {
   }
 
   /**
+   * Проверка существования урока в GraphRAG
+   */
+  async lessonExists(lessonId: string): Promise<boolean> {
+    const session = this.driver.session();
+    try {
+      const result = await session.run(
+        `MATCH (l:Lesson {id: $lessonId})-[:HAS_CHUNK]->(c:Chunk) RETURN count(c) as count`,
+        { lessonId }
+      );
+      const count = result.records[0]?.get('count').toNumber() || 0;
+      return count > 0;
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
+   * Получение информации об уроке из GraphRAG
+   */
+  async getLessonInfo(lessonId: string): Promise<{ id: string; title: string; chunkCount: number } | null> {
+    const session = this.driver.session();
+    try {
+      const result = await session.run(
+        `
+        MATCH (l:Lesson {id: $lessonId})
+        OPTIONAL MATCH (l)-[:HAS_CHUNK]->(c:Chunk)
+        RETURN l.id as id, l.title as title, count(c) as chunkCount
+        `,
+        { lessonId }
+      );
+      
+      if (result.records.length === 0) {
+        return null;
+      }
+      
+      const record = result.records[0];
+      return {
+        id: record.get('id'),
+        title: record.get('title') || 'Без названия',
+        chunkCount: record.get('chunkCount').toNumber()
+      };
+    } finally {
+      await session.close();
+    }
+  }
+
+  /**
    * 2. ТРЕКИНГ СТУДЕНТОВ - Создание/обновление профиля студента
    */
   async addOrUpdateStudent(
